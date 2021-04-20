@@ -9,7 +9,7 @@ all:
 	@echo "Find binaries in \"$(GOBIN)\" directory."
 	@echo ""
 	@echo "Copy config-example.toml to \"$(GOBIN)\" directory"
-	@cp -uv config-example.toml $(GOBIN)
+	@cp -uv params/config-example.toml $(GOBIN)
 
 clean:
 	$(GOCMD) clean -cache

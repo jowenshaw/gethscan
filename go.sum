@@ -7,8 +7,8 @@ github.com/Shopify/toxiproxy v2.1.4+incompatible/go.mod h1:OXgGpZ6Cli1/URJOF1DMx
 github.com/aead/siphash v1.0.1/go.mod h1:Nywa3cDsYNNK3gaciGTWPwHt0wlpNV15vwmswBAUSII=
 github.com/alecthomas/template v0.0.0-20160405071501-a0175ee3bccc/go.mod h1:LOuyumcjzFXgccqObfd/Ljyb9UuFJ6TxHnclSeseNhc=
 github.com/alecthomas/units v0.0.0-20151022065526-2efee857e7cf/go.mod h1:ybxpYRFXyAe+OPACYpWeL0wqObRcbAqCMya13uyzqw0=
-github.com/anyswap/CrossChain-Bridge v0.3.4 h1:hxu8mOg/2ccL7BELN/kmhfeyVbjfiZg56YJno5Fkj18=
-github.com/anyswap/CrossChain-Bridge v0.3.4/go.mod h1:z/LV5UpYhIXu1st2KMOzzmZtimDO3DVWMunvEyh1Zt0=
+github.com/anyswap/CrossChain-Bridge v0.3.5 h1:thyj9887vV+5lS1jmklsZe7bQJbH89MWe46oNTKTLQE=
+github.com/anyswap/CrossChain-Bridge v0.3.5/go.mod h1:z/LV5UpYhIXu1st2KMOzzmZtimDO3DVWMunvEyh1Zt0=
 github.com/aristanetworks/fsnotify v1.4.2/go.mod h1:D/rtu7LpjYM8tRJphJ0hUBYpjai8SfX+aSNsWDTq/Ks=
 github.com/aristanetworks/glog v0.0.0-20180419172825-c15b03b3054f/go.mod h1:KASm+qXFKs/xjSoWn30NrWBBvdTTQq+UjkhjEJHfSFA=
 github.com/aristanetworks/goarista v0.0.0-20191106175434-873d404c7f40 h1:ZdRuixFqR3mfx4FHzclG3COrRgWrYq0VhNgIoYoObcM=

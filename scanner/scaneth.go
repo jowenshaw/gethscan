@@ -18,25 +18,11 @@ import (
 	"github.com/fsn-dev/fsn-go-sdk/efsn/common"
 	"github.com/fsn-dev/fsn-go-sdk/efsn/core/types"
 	"github.com/fsn-dev/fsn-go-sdk/efsn/ethclient"
+	"github.com/jowenshaw/gethscan/params"
 	"github.com/urfave/cli/v2"
 )
 
 var (
-	isSwapoutType2Flag = &cli.BoolFlag{
-		Name:  "swapoutType2",
-		Usage: "is swapout bind address string type",
-	}
-
-	scanReceiptFlag = &cli.BoolFlag{
-		Name:  "scanReceipt",
-		Usage: "scan transaction receipt",
-	}
-
-	isProxyFlag = &cli.BoolFlag{
-		Name:  "isProxy",
-		Usage: "is proxy contract",
-	}
-
 	// VerbosityFlag --verbosity
 	VerbosityFlag = &cli.Uint64Flag{
 		Name:  "verbosity",
@@ -54,19 +40,11 @@ var (
 scan txs on eth
 `,
 		Flags: []cli.Flag{
-			utils.GatewayFlag,
-			utils.SwapServerFlag,
-			utils.SwapTypeFlag,
-			utils.DepositAddressSliceFlag,
-			utils.TokenAddressSliceFlag,
-			utils.PairIDSliceFlag,
+			utils.ConfigFileFlag,
 			utils.StartHeightFlag,
 			utils.EndHeightFlag,
 			utils.StableHeightFlag,
 			utils.JobsFlag,
-			isSwapoutType2Flag,
-			scanReceiptFlag,
-			isProxyFlag,
 		},
 	}
 
@@ -76,7 +54,6 @@ scan txs on eth
 type ethSwapScanner struct {
 	gateway          string
 	swapServer       string
-	swapType         string
 	depositAddresses []string
 	tokenAddresses   []string
 	pairIDs          []string
@@ -107,43 +84,18 @@ func SetLogger(ctx *cli.Context) {
 
 func scanEth(ctx *cli.Context) error {
 	SetLogger(ctx)
+	params.LoadConfig(utils.GetConfigFilePath(ctx))
 	scanner := &ethSwapScanner{
 		ctx:           context.Background(),
 		rpcInterval:   3 * time.Second,
 		rpcRetryCount: 3,
 	}
-	scanner.gateway = ctx.String(utils.GatewayFlag.Name)
-	scanner.swapServer = ctx.String(utils.SwapServerFlag.Name)
-	scanner.swapType = ctx.String(utils.SwapTypeFlag.Name)
-	scanner.depositAddresses = ctx.StringSlice(utils.DepositAddressSliceFlag.Name)
-	scanner.tokenAddresses = ctx.StringSlice(utils.TokenAddressSliceFlag.Name)
-	scanner.pairIDs = ctx.StringSlice(utils.PairIDSliceFlag.Name)
 	scanner.startHeight = ctx.Uint64(utils.StartHeightFlag.Name)
 	scanner.endHeight = ctx.Uint64(utils.EndHeightFlag.Name)
 	scanner.stableHeight = ctx.Uint64(utils.StableHeightFlag.Name)
 	scanner.jobCount = ctx.Uint64(utils.JobsFlag.Name)
-	scanner.isSwapoutType2 = ctx.Bool(isSwapoutType2Flag.Name)
-	scanner.scanReceipt = ctx.Bool(scanReceiptFlag.Name)
-	scanner.isProxy = ctx.Bool(isProxyFlag.Name)
-
-	switch strings.ToLower(scanner.swapType) {
-	case "swapin":
-		scanner.isSwapin = true
-	case "swapout":
-		scanner.isSwapin = false
-	default:
-		log.Fatalf("unknown swap type: '%v'", scanner.swapType)
-	}
 
 	log.Info("get argument success",
-		"gateway", scanner.gateway,
-		"swapServer", scanner.swapServer,
-		"swapType", scanner.swapType,
-		"depositAddress", scanner.depositAddresses,
-		"tokenAddress", scanner.tokenAddresses,
-		"pairID", scanner.pairIDs,
-		"scanReceipt", scanner.scanReceipt,
-		"isProxy", scanner.isProxy,
 		"start", scanner.startHeight,
 		"end", scanner.endHeight,
 		"stable", scanner.stableHeight,
@@ -220,9 +172,6 @@ func (scanner *ethSwapScanner) init() {
 		log.Fatal("get server version failed", "swapServer", scanner.swapServer)
 	}
 
-	eth.InitExtCodePartsWithFlag(scanner.isSwapoutType2)
-	logSwapoutTopic = eth.ExtCodeParts["LogSwapoutTopic"]
-
 	for _, tokenAddr := range scanner.tokenAddresses {
 		if scanner.isSwapin && tokenAddr == "" {
 			continue
@@ -267,7 +216,6 @@ func (scanner *ethSwapScanner) run() {
 	}
 }
 
-// nolint:dupl // in diff sub command
 func (scanner *ethSwapScanner) doScanRangeJob(start, end uint64) {
 	if start >= end {
 		return

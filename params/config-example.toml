@@ -1,0 +1,33 @@
+[[Tokens]]
+PairID = "eth"
+SwapServer = "http://127.0.0.1:11556/rpc"
+TokenAddress = "native"
+DepositAddress = "0xaF0A46d3700E23a98F38079cE217742c92aa66aC"
+LogTopics = []
+
+[[Tokens]]
+PairID = "usdt"
+SwapServer = "http://127.0.0.1:22556/rpc"
+TokenAddress = "0x61b8c4d6d28d5f7edadbea5456db3b4f7f836b64"
+DepositAddress = "0xbF0A46d3700E23a98F38079cE217742c92Bb66bC"
+LogTopics = [
+	"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+]
+
+[[Tokens]]
+PairID = "bsc"
+SwapServer = "http://127.0.0.1:33556/rpc"
+TokenAddress = "0x71b8c4d7d28d5f7edadbea5457db3b4f7f837b74"
+DepositAddress = ""
+LogTopics = [
+	"0x6b616089d04950dc06c45c6dd787d657980543f89651aec47924752c7d16c888"
+]
+
+[[Tokens]]
+PairID = "btc"
+SwapServer = "http://127.0.0.1:44556/rpc"
+TokenAddress = "0x81b8c4d8d28d5f8edadbea5458db3b4f8f838b84"
+DepositAddress = ""
+LogTopics = [
+	"0x9c92ad817e5474d30a4378deface765150479363a897b0590fbb12ae9d89396b"
+]
