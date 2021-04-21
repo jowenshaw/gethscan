@@ -3,6 +3,7 @@ package scanner
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -268,6 +269,7 @@ func (scanner *ethSwapScanner) scanTransaction(tx *types.Transaction) {
 		receipt = r
 	}
 
+LOOPTOKENS:
 	for _, tokenCfg := range params.GetScanConfig().Tokens {
 		tokenAddress := tokenCfg.TokenAddress
 		depositAddress := tokenCfg.DepositAddress
@@ -276,24 +278,24 @@ func (scanner *ethSwapScanner) scanTransaction(tx *types.Transaction) {
 			if tokenCfg.IsNativeToken() {
 				if strings.EqualFold(txTo, depositAddress) {
 					selTokenCfg = tokenCfg
-					break
+					break LOOPTOKENS
 				}
 			} else if strings.EqualFold(txTo, tokenAddress) {
 				selTokenCfg = tokenCfg
 				verifyErr = scanner.verifyErc20SwapinTx(tx, receipt, tokenCfg)
-				break
+				break LOOPTOKENS
 			}
 		case !scanner.scanReceipt:
 			if strings.EqualFold(txTo, tokenAddress) {
 				selTokenCfg = tokenCfg
 				verifyErr = scanner.verifySwapoutTx(tx, receipt, tokenCfg)
-				break
+				break LOOPTOKENS
 			}
 		default:
 			err := parseSwapoutTxLogs(receipt.Logs, tokenAddress, tokenCfg.LogTopics)
 			if err == nil {
 				selTokenCfg = tokenCfg
-				break
+				break LOOPTOKENS
 			}
 		}
 	}
@@ -301,8 +303,19 @@ func (scanner *ethSwapScanner) scanTransaction(tx *types.Transaction) {
 		if tokens.ShouldRegisterSwapForError(verifyErr) {
 			scanner.postSwap(txHash, selTokenCfg)
 		} else {
-			log.Debug("verify swap error", "txHash", txHash, "err", verifyErr)
+			scanner.printVerifyError(txHash, verifyErr)
 		}
+	}
+}
+
+func (scanner *ethSwapScanner) printVerifyError(txHash string, verifyErr error) {
+	switch {
+	case errors.Is(verifyErr, tokens.ErrTxFuncHashMismatch):
+	case errors.Is(verifyErr, tokens.ErrTxWithWrongReceiver):
+	case errors.Is(verifyErr, tokens.ErrTxWithWrongContract):
+	case errors.Is(verifyErr, tokens.ErrTxNotFound):
+	default:
+		log.Debug("verify swap error", "txHash", txHash, "err", verifyErr)
 	}
 }
 
@@ -332,7 +345,12 @@ func (scanner *ethSwapScanner) postSwap(txid string, tokenCfg *params.TokenConfi
 		if tools.IsSwapAlreadyExistRegisterError(err) {
 			break
 		}
-		log.Warn(subject+" failed", "txid", txid, "pairID", pairID, "err", err)
+		switch {
+		case errors.Is(err, tokens.ErrTxFuncHashMismatch):
+		case errors.Is(err, tokens.ErrTxNotFound):
+		default:
+			log.Warn(subject+" failed", "txid", txid, "pairID", pairID, "err", err)
+		}
 	}
 }
 

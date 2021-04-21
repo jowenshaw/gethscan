@@ -13,7 +13,12 @@ func WatchAndReloadScanConfig() {
 		log.Error("fsnotify.NewWatcher failed", "err", err)
 		return
 	}
-	defer watch.Close()
+	defer func() {
+		err = watch.Close()
+		if err != nil {
+			log.Error("fsnotify close watcher failed", "err", err)
+		}
+	}()
 
 	err = watch.Add(configFile)
 	if err != nil {
