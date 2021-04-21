@@ -85,6 +85,8 @@ func SetLogger(ctx *cli.Context) {
 func scanEth(ctx *cli.Context) error {
 	SetLogger(ctx)
 	params.LoadConfig(utils.GetConfigFilePath(ctx))
+	go params.WatchAndReloadScanConfig()
+
 	scanner := &ethSwapScanner{
 		ctx:           context.Background(),
 		rpcInterval:   3 * time.Second,
