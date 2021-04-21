@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/big"
@@ -12,7 +13,6 @@ import (
 	"github.com/anyswap/CrossChain-Bridge/log"
 	"github.com/anyswap/CrossChain-Bridge/rpc/client"
 	"github.com/anyswap/CrossChain-Bridge/tokens"
-	"github.com/anyswap/CrossChain-Bridge/tokens/eth"
 	"github.com/anyswap/CrossChain-Bridge/tokens/tools"
 	"github.com/fsn-dev/fsn-go-sdk/efsn/common"
 	"github.com/fsn-dev/fsn-go-sdk/efsn/core/types"
@@ -53,6 +53,11 @@ scan cross chain swaps
 			utils.JobsFlag,
 		},
 	}
+
+	transferFuncHash       = common.FromHex("0xa9059cbb")
+	transferFromFuncHash   = common.FromHex("0x23b872dd")
+	stringSwapoutFuncHash  = common.FromHex("0xad54056d")
+	addressSwapoutFuncHash = common.FromHex("0x628d6cba")
 )
 
 type ethSwapScanner struct {
@@ -328,8 +333,7 @@ func (scanner *ethSwapScanner) postSwap(txid string, tokenCfg *params.TokenConfi
 
 func (scanner *ethSwapScanner) verifyErc20SwapinTx(tx *types.Transaction, receipt *types.Receipt, tokenCfg *params.TokenConfig) (err error) {
 	if receipt == nil {
-		input := tx.Data()
-		_, _, _, err = eth.ParseErc20SwapinTxInput(&input, tokenCfg.DepositAddress)
+		err = parseErc20SwapinTxInput(tx.Data(), tokenCfg.DepositAddress)
 	} else {
 		err = parseErc20SwapinTxLogs(receipt.Logs, tokenCfg.TokenAddress, tokenCfg.DepositAddress, tokenCfg.LogTopics)
 	}
@@ -338,12 +342,31 @@ func (scanner *ethSwapScanner) verifyErc20SwapinTx(tx *types.Transaction, receip
 
 func (scanner *ethSwapScanner) verifySwapoutTx(tx *types.Transaction, receipt *types.Receipt, tokenCfg *params.TokenConfig) (err error) {
 	if receipt == nil {
-		input := tx.Data()
-		_, _, err = eth.ParseSwapoutTxInput(&input)
+		err = parseSwapoutTxInput(tx.Data())
 	} else {
 		err = parseSwapoutTxLogs(receipt.Logs, tokenCfg.TokenAddress, tokenCfg.LogTopics)
 	}
 	return err
+}
+
+func parseErc20SwapinTxInput(input []byte, depositAddress string) error {
+	if len(input) < 4 {
+		return tokens.ErrTxWithWrongInput
+	}
+	var receiver string
+	funcHash := input[:4]
+	switch {
+	case bytes.Equal(funcHash, transferFuncHash):
+		receiver = common.BytesToAddress(common.GetData(input, 4, 32)).Hex()
+	case bytes.Equal(funcHash, transferFromFuncHash):
+		receiver = common.BytesToAddress(common.GetData(input, 36, 32)).Hex()
+	default:
+		return tokens.ErrTxFuncHashMismatch
+	}
+	if !strings.EqualFold(receiver, depositAddress) {
+		return tokens.ErrTxWithWrongReceiver
+	}
+	return nil
 }
 
 func parseErc20SwapinTxLogs(logs []*types.Log, targetContract, depositAddress string, logSwapTopics []string) (err error) {
@@ -369,6 +392,20 @@ func parseErc20SwapinTxLogs(logs []*types.Log, targetContract, depositAddress st
 		}
 	}
 	return tokens.ErrDepositLogNotFound
+}
+
+func parseSwapoutTxInput(input []byte) error {
+	if len(input) < 4 {
+		return tokens.ErrTxWithWrongInput
+	}
+	funcHash := input[:4]
+	switch {
+	case bytes.Equal(funcHash, addressSwapoutFuncHash):
+	case bytes.Equal(funcHash, stringSwapoutFuncHash):
+	default:
+		return tokens.ErrTxFuncHashMismatch
+	}
+	return nil
 }
 
 func parseSwapoutTxLogs(logs []*types.Log, targetContract string, logSwapTopics []string) (err error) {
