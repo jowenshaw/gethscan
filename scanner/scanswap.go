@@ -256,16 +256,16 @@ func (scanner *ethSwapScanner) scanTransaction(tx *types.Transaction) {
 
 		selTokenCfg *params.TokenConfig
 		receipt     *types.Receipt
-		err         error
 		verifyErr   error
 	)
 
 	if scanner.scanReceipt {
-		receipt, err = scanner.getTxReceipt(tx.Hash())
+		r, err := scanner.getTxReceipt(tx.Hash())
 		if err != nil {
 			log.Warn("get tx receipt error", "txHash", txHash, "err", err)
 			return
 		}
+		receipt = r
 	}
 
 	for _, tokenCfg := range params.GetScanConfig().Tokens {
@@ -290,14 +290,19 @@ func (scanner *ethSwapScanner) scanTransaction(tx *types.Transaction) {
 				break
 			}
 		default:
-			if err = parseSwapoutTxLogs(receipt.Logs, tokenAddress, tokenCfg.LogTopics); err == nil {
+			err := parseSwapoutTxLogs(receipt.Logs, tokenAddress, tokenCfg.LogTopics)
+			if err == nil {
 				selTokenCfg = tokenCfg
 				break
 			}
 		}
 	}
-	if selTokenCfg != nil && tokens.ShouldRegisterSwapForError(verifyErr) {
-		scanner.postSwap(txHash, selTokenCfg)
+	if selTokenCfg != nil {
+		if tokens.ShouldRegisterSwapForError(verifyErr) {
+			scanner.postSwap(txHash, selTokenCfg)
+		} else {
+			log.Debug("verify swap error", "txHash", txHash, "err", verifyErr)
+		}
 	}
 }
 
