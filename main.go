@@ -22,7 +22,7 @@ func initApp() {
 	app.Version = params.Version
 	app.Usage = "scan eth like blockchain"
 	app.Commands = []*cli.Command{
-		scanner.ScanEthCommand,
+		scanner.ScanSwapCommand,
 	}
 	app.Flags = []cli.Flag{
 		scanner.VerbosityFlag,

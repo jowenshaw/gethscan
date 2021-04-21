@@ -3,6 +3,7 @@ package params
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/anyswap/CrossChain-Bridge/common"
@@ -94,10 +95,25 @@ func (c *ScanConfig) CheckConfig() (err error) {
 	if len(c.Tokens) == 0 {
 		return errors.New("no token config exist")
 	}
+	pairIDMap := make(map[string]struct{})
+	tokensMap := make(map[string]struct{})
+	exist := false
 	for _, tokenCfg := range c.Tokens {
 		err = tokenCfg.CheckConfig()
 		if err != nil {
 			return err
+		}
+		pairID := strings.ToLower(tokenCfg.PairID)
+		if _, exist = pairIDMap[pairID]; exist {
+			return errors.New("duplicate pairID " + pairID)
+		}
+		pairIDMap[pairID] = struct{}{}
+		if !tokenCfg.IsNativeToken() {
+			tokenAddr := strings.ToLower(tokenCfg.TokenAddress)
+			if _, exist = tokensMap[tokenAddr]; exist {
+				return errors.New("duplicate token address " + tokenAddr)
+			}
+			tokensMap[tokenAddr] = struct{}{}
 		}
 	}
 	return nil
