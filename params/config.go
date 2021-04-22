@@ -3,6 +3,7 @@ package params
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -103,17 +104,17 @@ func (c *ScanConfig) CheckConfig() (err error) {
 		if err != nil {
 			return err
 		}
-		pairID := strings.ToLower(tokenCfg.PairID)
-		if _, exist = pairIDMap[pairID]; exist {
-			return errors.New("duplicate pairID " + pairID)
+		pairIDKey := strings.ToLower(fmt.Sprintf("%v:%v:%v", tokenCfg.PairID, tokenCfg.TxType, tokenCfg.SwapServer))
+		if _, exist = pairIDMap[pairIDKey]; exist {
+			return errors.New("duplicate pairID config" + pairIDKey)
 		}
-		pairIDMap[pairID] = struct{}{}
+		pairIDMap[pairIDKey] = struct{}{}
 		if !tokenCfg.IsNativeToken() {
-			tokenAddr := strings.ToLower(tokenCfg.TokenAddress)
-			if _, exist = tokensMap[tokenAddr]; exist {
-				return errors.New("duplicate token address " + tokenAddr)
+			tokensKey := strings.ToLower(fmt.Sprintf("%v:%v", tokenCfg.TokenAddress, tokenCfg.DepositAddress))
+			if _, exist = tokensMap[tokensKey]; exist {
+				return errors.New("duplicate token config " + tokensKey)
 			}
-			tokensMap[tokenAddr] = struct{}{}
+			tokensMap[tokensKey] = struct{}{}
 		}
 	}
 	return nil
