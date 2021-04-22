@@ -59,6 +59,10 @@ scan cross chain swaps
 	transferFromFuncHash   = common.FromHex("0x23b872dd")
 	stringSwapoutFuncHash  = common.FromHex("0xad54056d")
 	addressSwapoutFuncHash = common.FromHex("0x628d6cba")
+
+	transferLogTopic       = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	stringSwapoutLogTopic  = common.HexToHash("0x6b616089d04950dc06c45c6dd787d657980543f89651aec47924752c7d16c888")
+	addressSwapoutLogTopic = common.HexToHash("0x9c92ad817e5474d30a4378deface765150479363a897b0590fbb12ae9d89396b")
 )
 
 type ethSwapScanner struct {
@@ -83,6 +87,7 @@ func SetLogger(ctx *cli.Context) {
 	jsonFormat := ctx.Bool(utils.JSONFormatFlag.Name)
 	colorFormat := ctx.Bool(utils.ColorFormatFlag.Name)
 	log.SetLogger(uint32(logLevel), jsonFormat, colorFormat)
+	log.Info("init logger finished", "logLevel", logLevel, "jsonFormat", jsonFormat, "colorFormat", colorFormat)
 }
 
 func scanSwap(ctx *cli.Context) error {
@@ -292,7 +297,7 @@ LOOPTOKENS:
 				break LOOPTOKENS
 			}
 		default:
-			err := parseSwapoutTxLogs(receipt.Logs, tokenAddress, tokenCfg.LogTopics)
+			err := scanner.parseSwapoutTxLogs(receipt.Logs, tokenAddress, tokenCfg.TxType)
 			if err == nil {
 				selTokenCfg = tokenCfg
 				break LOOPTOKENS
@@ -354,25 +359,39 @@ func (scanner *ethSwapScanner) postSwap(txid string, tokenCfg *params.TokenConfi
 	}
 }
 
+func (scanner *ethSwapScanner) getLogTopicByTxType(txType string) common.Hash {
+	switch strings.ToLower(txType) {
+	case "swapin":
+		return transferLogTopic
+	case "swapout":
+		return addressSwapoutLogTopic
+	case "swapout2":
+		return stringSwapoutLogTopic
+	default:
+		log.Errorf("unknown tx type %v", txType)
+		return common.Hash{}
+	}
+}
+
 func (scanner *ethSwapScanner) verifyErc20SwapinTx(tx *types.Transaction, receipt *types.Receipt, tokenCfg *params.TokenConfig) (err error) {
 	if receipt == nil {
-		err = parseErc20SwapinTxInput(tx.Data(), tokenCfg.DepositAddress)
+		err = scanner.parseErc20SwapinTxInput(tx.Data(), tokenCfg.DepositAddress)
 	} else {
-		err = parseErc20SwapinTxLogs(receipt.Logs, tokenCfg.TokenAddress, tokenCfg.DepositAddress, tokenCfg.LogTopics)
+		err = scanner.parseErc20SwapinTxLogs(receipt.Logs, tokenCfg.TokenAddress, tokenCfg.DepositAddress, tokenCfg.TxType)
 	}
 	return err
 }
 
 func (scanner *ethSwapScanner) verifySwapoutTx(tx *types.Transaction, receipt *types.Receipt, tokenCfg *params.TokenConfig) (err error) {
 	if receipt == nil {
-		err = parseSwapoutTxInput(tx.Data())
+		err = scanner.parseSwapoutTxInput(tx.Data())
 	} else {
-		err = parseSwapoutTxLogs(receipt.Logs, tokenCfg.TokenAddress, tokenCfg.LogTopics)
+		err = scanner.parseSwapoutTxLogs(receipt.Logs, tokenCfg.TokenAddress, tokenCfg.TxType)
 	}
 	return err
 }
 
-func parseErc20SwapinTxInput(input []byte, depositAddress string) error {
+func (scanner *ethSwapScanner) parseErc20SwapinTxInput(input []byte, depositAddress string) error {
 	if len(input) < 4 {
 		return tokens.ErrTxWithWrongInput
 	}
@@ -392,7 +411,7 @@ func parseErc20SwapinTxInput(input []byte, depositAddress string) error {
 	return nil
 }
 
-func parseErc20SwapinTxLogs(logs []*types.Log, targetContract, depositAddress string, logSwapTopics []string) (err error) {
+func (scanner *ethSwapScanner) parseErc20SwapinTxLogs(logs []*types.Log, targetContract, depositAddress, txType string) (err error) {
 	for _, log := range logs {
 		if log.Removed {
 			continue
@@ -403,21 +422,18 @@ func parseErc20SwapinTxLogs(logs []*types.Log, targetContract, depositAddress st
 		if len(log.Topics) != 3 || log.Data == nil {
 			continue
 		}
-		logTopic := log.Topics[0].Hex()
-		for _, topic := range logSwapTopics {
-			if logTopic == topic {
-				receiver := common.BytesToAddress(log.Topics[2][:]).Hex()
-				if strings.EqualFold(receiver, depositAddress) {
-					return nil
-				}
-				return tokens.ErrTxWithWrongReceiver
+		if log.Topics[0] == scanner.getLogTopicByTxType(txType) {
+			receiver := common.BytesToAddress(log.Topics[2][:]).Hex()
+			if strings.EqualFold(receiver, depositAddress) {
+				return nil
 			}
+			return tokens.ErrTxWithWrongReceiver
 		}
 	}
 	return tokens.ErrDepositLogNotFound
 }
 
-func parseSwapoutTxInput(input []byte) error {
+func (scanner *ethSwapScanner) parseSwapoutTxInput(input []byte) error {
 	if len(input) < 4 {
 		return tokens.ErrTxWithWrongInput
 	}
@@ -431,7 +447,7 @@ func parseSwapoutTxInput(input []byte) error {
 	return nil
 }
 
-func parseSwapoutTxLogs(logs []*types.Log, targetContract string, logSwapTopics []string) (err error) {
+func (scanner *ethSwapScanner) parseSwapoutTxLogs(logs []*types.Log, targetContract, txType string) (err error) {
 	for _, log := range logs {
 		if log.Removed {
 			continue
@@ -442,11 +458,8 @@ func parseSwapoutTxLogs(logs []*types.Log, targetContract string, logSwapTopics 
 		if len(log.Topics) != 3 || log.Data == nil {
 			continue
 		}
-		logTopic := log.Topics[0].Hex()
-		for _, topic := range logSwapTopics {
-			if logTopic == topic {
-				return nil
-			}
+		if log.Topics[0] == scanner.getLogTopicByTxType(txType) {
+			return nil
 		}
 	}
 	return tokens.ErrSwapoutLogNotFound

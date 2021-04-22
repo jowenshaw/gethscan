@@ -22,11 +22,11 @@ type ScanConfig struct {
 
 // TokenConfig token config
 type TokenConfig struct {
+	TxType         string
 	PairID         string
 	SwapServer     string
 	TokenAddress   string
-	DepositAddress string   `toml:",omitempty" json:",omitempty"`
-	LogTopics      []string `toml:",omitempty" json:",omitempty"`
+	DepositAddress string `toml:",omitempty" json:",omitempty"`
 }
 
 // IsNativeToken is native token
@@ -121,6 +121,9 @@ func (c *ScanConfig) CheckConfig() (err error) {
 
 // CheckConfig check token config
 func (c *TokenConfig) CheckConfig() error {
+	if c.TxType == "" {
+		return errors.New("empty 'TxType'")
+	}
 	if c.PairID == "" {
 		return errors.New("empty 'PairID'")
 	}
@@ -132,11 +135,6 @@ func (c *TokenConfig) CheckConfig() error {
 	}
 	if c.DepositAddress != "" && !common.IsHexAddress(c.DepositAddress) {
 		return errors.New("wrong 'DepositAddress' " + c.DepositAddress)
-	}
-	for _, topic := range c.LogTopics {
-		if common.HexToHash(topic).Hex() != topic {
-			return errors.New("wrong 'LogTopics' " + topic)
-		}
 	}
 	return nil
 }

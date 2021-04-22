@@ -5,7 +5,6 @@ import (
 	"os"
 
 	"github.com/anyswap/CrossChain-Bridge/cmd/utils"
-	"github.com/anyswap/CrossChain-Bridge/log"
 	"github.com/jowenshaw/gethscan/params"
 	"github.com/jowenshaw/gethscan/scanner"
 	"github.com/urfave/cli/v2"
@@ -34,19 +33,17 @@ func initApp() {
 func main() {
 	initApp()
 	if err := app.Run(os.Args); err != nil {
-		log.Println(err)
+		fmt.Println(err)
 		os.Exit(1)
 	}
 }
 
 func run(ctx *cli.Context) error {
-	scanner.SetLogger(ctx)
 	if ctx.NArg() > 0 {
 		return fmt.Errorf("invalid command: %q", ctx.Args().Get(0))
 	}
 
 	_ = cli.ShowAppHelp(ctx)
-	fmt.Println()
-	log.Fatalf("please specify a sub command to run")
+	fmt.Println("\nError: please specify a sub command to run")
 	return nil
 }
