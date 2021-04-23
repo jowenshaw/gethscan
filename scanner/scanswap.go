@@ -57,12 +57,18 @@ scan cross chain swaps
 
 	transferFuncHash       = common.FromHex("0xa9059cbb")
 	transferFromFuncHash   = common.FromHex("0x23b872dd")
-	stringSwapoutFuncHash  = common.FromHex("0xad54056d")
-	addressSwapoutFuncHash = common.FromHex("0x628d6cba")
+	addressSwapoutFuncHash = common.FromHex("0x628d6cba") // for ETH like `address` type address
+	stringSwapoutFuncHash  = common.FromHex("0xad54056d") // for BTC like `string` type address
 
 	transferLogTopic       = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
 	stringSwapoutLogTopic  = common.HexToHash("0x6b616089d04950dc06c45c6dd787d657980543f89651aec47924752c7d16c888")
 	addressSwapoutLogTopic = common.HexToHash("0x9c92ad817e5474d30a4378deface765150479363a897b0590fbb12ae9d89396b")
+)
+
+const (
+	txSwapin   = "swapin"
+	txSwapout  = "swapout"
+	txSwapout2 = "swapout2"
 )
 
 type ethSwapScanner struct {
@@ -256,15 +262,8 @@ func (scanner *ethSwapScanner) scanTransaction(tx *types.Transaction) {
 	if tx.To() == nil {
 		return
 	}
-	var (
-		txTo   = tx.To().Hex()
-		txHash = tx.Hash().Hex()
-
-		selTokenCfg *params.TokenConfig
-		receipt     *types.Receipt
-		verifyErr   error
-	)
-
+	txHash := tx.Hash().Hex()
+	var receipt *types.Receipt
 	if scanner.scanReceipt {
 		r, err := scanner.getTxReceipt(tx.Hash())
 		if err != nil {
@@ -274,43 +273,48 @@ func (scanner *ethSwapScanner) scanTransaction(tx *types.Transaction) {
 		receipt = r
 	}
 
-LOOPTOKENS:
 	for _, tokenCfg := range params.GetScanConfig().Tokens {
-		tokenAddress := tokenCfg.TokenAddress
-		depositAddress := tokenCfg.DepositAddress
-		switch {
-		case depositAddress != "":
-			if tokenCfg.IsNativeToken() {
-				if strings.EqualFold(txTo, depositAddress) {
-					selTokenCfg = tokenCfg
-					break LOOPTOKENS
-				}
-			} else if strings.EqualFold(txTo, tokenAddress) {
-				selTokenCfg = tokenCfg
-				verifyErr = scanner.verifyErc20SwapinTx(tx, receipt, tokenCfg)
-				break LOOPTOKENS
+		matched, verifyErr := scanner.verifyTransaction(tx, receipt, tokenCfg)
+		if matched {
+			if tokens.ShouldRegisterSwapForError(verifyErr) {
+				scanner.postSwap(txHash, tokenCfg)
+			} else {
+				scanner.printVerifyError(txHash, verifyErr)
 			}
-		case !scanner.scanReceipt:
-			if strings.EqualFold(txTo, tokenAddress) {
-				selTokenCfg = tokenCfg
-				verifyErr = scanner.verifySwapoutTx(tx, receipt, tokenCfg)
-				break LOOPTOKENS
-			}
-		default:
-			err := scanner.parseSwapoutTxLogs(receipt.Logs, tokenAddress, tokenCfg.TxType)
-			if err == nil {
-				selTokenCfg = tokenCfg
-				break LOOPTOKENS
-			}
+			break
 		}
 	}
-	if selTokenCfg != nil {
-		if tokens.ShouldRegisterSwapForError(verifyErr) {
-			scanner.postSwap(txHash, selTokenCfg)
-		} else {
-			scanner.printVerifyError(txHash, verifyErr)
+}
+
+func (scanner *ethSwapScanner) verifyTransaction(tx *types.Transaction, receipt *types.Receipt, tokenCfg *params.TokenConfig) (matched bool, verifyErr error) {
+	txTo := tx.To().Hex()
+	tokenAddress := tokenCfg.TokenAddress
+	depositAddress := tokenCfg.DepositAddress
+	switch {
+	case depositAddress != "":
+		if tokenCfg.IsNativeToken() {
+			matched = strings.EqualFold(txTo, depositAddress)
+			return matched, nil
+		} else if strings.EqualFold(txTo, tokenAddress) {
+			verifyErr = scanner.verifyErc20SwapinTx(tx, receipt, tokenCfg)
+			if verifyErr == tokens.ErrTxWithWrongReceiver {
+				// swapin my have multiple deposit addresses for different bridges
+				return false, verifyErr
+			}
+			return true, verifyErr
+		}
+	case !scanner.scanReceipt:
+		if strings.EqualFold(txTo, tokenAddress) {
+			verifyErr = scanner.verifySwapoutTx(tx, receipt, tokenCfg)
+			return true, verifyErr
+		}
+	default:
+		verifyErr = scanner.parseSwapoutTxLogs(receipt.Logs, tokenAddress, tokenCfg.TxType)
+		if verifyErr == nil {
+			return true, nil
 		}
 	}
+	return false, verifyErr
 }
 
 func (scanner *ethSwapScanner) printVerifyError(txHash string, verifyErr error) {
@@ -347,7 +351,8 @@ func (scanner *ethSwapScanner) postSwap(txid string, tokenCfg *params.TokenConfi
 		if tokens.ShouldRegisterSwapForError(err) {
 			break
 		}
-		if tools.IsSwapAlreadyExistRegisterError(err) {
+		if tools.IsSwapAlreadyExistRegisterError(err) ||
+			strings.Contains(err.Error(), "mgoError: Item is duplicate") {
 			break
 		}
 		switch {
@@ -359,13 +364,25 @@ func (scanner *ethSwapScanner) postSwap(txid string, tokenCfg *params.TokenConfi
 	}
 }
 
+func (scanner *ethSwapScanner) getSwapoutFuncHashByTxType(txType string) []byte {
+	switch strings.ToLower(txType) {
+	case txSwapout:
+		return addressSwapoutFuncHash
+	case txSwapout2:
+		return stringSwapoutFuncHash
+	default:
+		log.Errorf("unknown swapout tx type %v", txType)
+		return nil
+	}
+}
+
 func (scanner *ethSwapScanner) getLogTopicByTxType(txType string) common.Hash {
 	switch strings.ToLower(txType) {
-	case "swapin":
+	case txSwapin:
 		return transferLogTopic
-	case "swapout":
+	case txSwapout:
 		return addressSwapoutLogTopic
-	case "swapout2":
+	case txSwapout2:
 		return stringSwapoutLogTopic
 	default:
 		log.Errorf("unknown tx type %v", txType)
@@ -384,7 +401,7 @@ func (scanner *ethSwapScanner) verifyErc20SwapinTx(tx *types.Transaction, receip
 
 func (scanner *ethSwapScanner) verifySwapoutTx(tx *types.Transaction, receipt *types.Receipt, tokenCfg *params.TokenConfig) (err error) {
 	if receipt == nil {
-		err = scanner.parseSwapoutTxInput(tx.Data())
+		err = scanner.parseSwapoutTxInput(tx.Data(), tokenCfg.TxType)
 	} else {
 		err = scanner.parseSwapoutTxLogs(receipt.Logs, tokenCfg.TokenAddress, tokenCfg.TxType)
 	}
@@ -433,18 +450,15 @@ func (scanner *ethSwapScanner) parseErc20SwapinTxLogs(logs []*types.Log, targetC
 	return tokens.ErrDepositLogNotFound
 }
 
-func (scanner *ethSwapScanner) parseSwapoutTxInput(input []byte) error {
+func (scanner *ethSwapScanner) parseSwapoutTxInput(input []byte, txType string) error {
 	if len(input) < 4 {
 		return tokens.ErrTxWithWrongInput
 	}
 	funcHash := input[:4]
-	switch {
-	case bytes.Equal(funcHash, addressSwapoutFuncHash):
-	case bytes.Equal(funcHash, stringSwapoutFuncHash):
-	default:
-		return tokens.ErrTxFuncHashMismatch
+	if bytes.Equal(funcHash, scanner.getSwapoutFuncHashByTxType(txType)) {
+		return nil
 	}
-	return nil
+	return tokens.ErrTxFuncHashMismatch
 }
 
 func (scanner *ethSwapScanner) parseSwapoutTxLogs(logs []*types.Log, targetContract, txType string) (err error) {
