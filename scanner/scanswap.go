@@ -14,11 +14,12 @@ import (
 	"github.com/anyswap/CrossChain-Bridge/log"
 	"github.com/anyswap/CrossChain-Bridge/rpc/client"
 	"github.com/anyswap/CrossChain-Bridge/tokens"
-	"github.com/anyswap/CrossChain-Bridge/tokens/tools"
+	ctools "github.com/anyswap/CrossChain-Bridge/tokens/tools"
 	"github.com/fsn-dev/fsn-go-sdk/efsn/common"
 	"github.com/fsn-dev/fsn-go-sdk/efsn/core/types"
 	"github.com/fsn-dev/fsn-go-sdk/efsn/ethclient"
 	"github.com/jowenshaw/gethscan/params"
+	"github.com/jowenshaw/gethscan/tools"
 	"github.com/urfave/cli/v2"
 )
 
@@ -69,6 +70,9 @@ const (
 	txSwapin   = "swapin"
 	txSwapout  = "swapout"
 	txSwapout2 = "swapout2"
+
+	swapExistKeywords   = "mgoError: Item is duplicate"
+	httpTimeoutKeywords = "Client.Timeout exceeded while awaiting headers"
 )
 
 type ethSwapScanner struct {
@@ -85,6 +89,15 @@ type ethSwapScanner struct {
 
 	rpcInterval   time.Duration
 	rpcRetryCount int
+
+	cachedSwapPosts *tools.Ring
+}
+
+type swapPost struct {
+	txid       string
+	pairID     string
+	rpcMethod  string
+	swapServer string
 }
 
 // SetLogger set logger
@@ -147,6 +160,9 @@ func (scanner *ethSwapScanner) initClient() {
 }
 
 func (scanner *ethSwapScanner) run() {
+	scanner.cachedSwapPosts = tools.NewRing(100)
+	go scanner.repostCachedSwaps()
+
 	start := scanner.startHeight
 	wend := scanner.endHeight
 	if wend == 0 {
@@ -329,7 +345,6 @@ func (scanner *ethSwapScanner) printVerifyError(txHash string, verifyErr error) 
 }
 
 func (scanner *ethSwapScanner) postSwap(txid string, tokenCfg *params.TokenConfig) {
-	swapServer := tokenCfg.SwapServer
 	pairID := tokenCfg.PairID
 	var subject, rpcMethod string
 	if tokenCfg.DepositAddress != "" {
@@ -341,27 +356,82 @@ func (scanner *ethSwapScanner) postSwap(txid string, tokenCfg *params.TokenConfi
 	}
 	log.Info(subject, "txid", txid, "pairID", pairID)
 
-	var result interface{}
-	args := map[string]interface{}{
-		"txid":   txid,
-		"pairid": pairID,
+	swap := &swapPost{
+		txid:       txid,
+		pairID:     pairID,
+		rpcMethod:  rpcMethod,
+		swapServer: tokenCfg.SwapServer,
 	}
+
+	var needCached bool
 	for i := 0; i < scanner.rpcRetryCount; i++ {
-		err := client.RPCPost(&result, swapServer, rpcMethod, args)
+		err := rpcPost(swap)
 		if tokens.ShouldRegisterSwapForError(err) {
+			needCached = false
 			break
 		}
-		if tools.IsSwapAlreadyExistRegisterError(err) ||
-			strings.Contains(err.Error(), "mgoError: Item is duplicate") {
+		if ctools.IsSwapAlreadyExistRegisterError(err) ||
+			strings.Contains(err.Error(), swapExistKeywords) {
+			needCached = false
 			break
 		}
 		switch {
 		case errors.Is(err, tokens.ErrTxFuncHashMismatch):
-		case errors.Is(err, tokens.ErrTxNotFound):
+			break
+		case errors.Is(err, tokens.ErrTxNotFound) ||
+			strings.Contains(err.Error(), httpTimeoutKeywords):
+			needCached = true
 		default:
-			log.Warn(subject+" failed", "txid", txid, "pairID", pairID, "err", err)
+			log.Warn(subject+" failed", "swap", swap, "err", err)
 		}
+		time.Sleep(scanner.rpcInterval)
 	}
+	if needCached {
+		log.Warn("cache swap", "swap", swap)
+		scanner.cachedSwapPosts.Add(swap)
+	}
+}
+
+func (scanner *ethSwapScanner) repostCachedSwaps() {
+	for {
+		scanner.cachedSwapPosts.Do(func(p interface{}) bool {
+			return scanner.repostSwap(p.(*swapPost))
+		})
+		time.Sleep(30 * time.Second)
+	}
+}
+
+func rpcPost(swap *swapPost) error {
+	timeout := 300
+	reqID := 666
+	args := map[string]interface{}{
+		"txid":   swap.txid,
+		"pairid": swap.pairID,
+	}
+	var result interface{}
+	return client.RPCPostWithTimeoutAndID(&result, timeout, reqID, swap.swapServer, swap.rpcMethod, args)
+}
+
+func (scanner *ethSwapScanner) repostSwap(swap *swapPost) bool {
+	for i := 0; i < scanner.rpcRetryCount; i++ {
+		err := rpcPost(swap)
+		if tokens.ShouldRegisterSwapForError(err) {
+			return true
+		}
+		if ctools.IsSwapAlreadyExistRegisterError(err) ||
+			strings.Contains(err.Error(), swapExistKeywords) {
+			return true
+		}
+		switch {
+		case errors.Is(err, tokens.ErrTxNotFound):
+		case strings.Contains(err.Error(), httpTimeoutKeywords):
+		default:
+			log.Warn("repost swap failed", "swap", swap, "err", err)
+			return true
+		}
+		time.Sleep(scanner.rpcInterval)
+	}
+	return false
 }
 
 func (scanner *ethSwapScanner) getSwapoutFuncHashByTxType(txType string) []byte {
