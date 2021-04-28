@@ -34,13 +34,13 @@ func (r *Ring) Add(p interface{}) {
 		r.ring = item
 	} else {
 		if r.ring.Len() == r.capacity {
-			r.delNext()
+			r.delCurrent()
 		}
 		r.ring.Prev().Link(item)
 	}
 }
 
-func (r *Ring) delNext() {
+func (r *Ring) delCurrent() {
 	if r.ring.Len() > 1 {
 		r.ring = r.ring.Prev()
 		r.ring.Unlink(1)
@@ -58,7 +58,7 @@ func (r *Ring) Do(do func(interface{}) bool) {
 	for i := 0; i < r.ring.Len(); i++ {
 		if do(r.ring.Value) {
 			i--
-			r.delNext()
+			r.delCurrent()
 		} else {
 			r.ring = r.ring.Next()
 		}
