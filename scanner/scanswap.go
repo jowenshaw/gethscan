@@ -36,6 +36,12 @@ var (
 		Usage: "scan transaction receipt instead of transaction",
 	}
 
+	startHeightFlag = &cli.Int64Flag{
+		Name:  "start",
+		Usage: "start height (start inclusive)",
+		Value: -200,
+	}
+
 	// ScanSwapCommand scan swaps on eth like blockchain
 	ScanSwapCommand = &cli.Command{
 		Action:    scanSwap,
@@ -49,7 +55,7 @@ scan cross chain swaps
 			utils.ConfigFileFlag,
 			utils.GatewayFlag,
 			scanReceiptFlag,
-			utils.StartHeightFlag,
+			startHeightFlag,
 			utils.EndHeightFlag,
 			utils.StableHeightFlag,
 			utils.JobsFlag,
@@ -75,11 +81,12 @@ const (
 	httpTimeoutKeywords = "Client.Timeout exceeded while awaiting headers"
 )
 
+var startHeightArgument int64
+
 type ethSwapScanner struct {
 	gateway     string
 	scanReceipt bool
 
-	startHeight  uint64
 	endHeight    uint64
 	stableHeight uint64
 	jobCount     uint64
@@ -121,7 +128,7 @@ func scanSwap(ctx *cli.Context) error {
 	}
 	scanner.gateway = ctx.String(utils.GatewayFlag.Name)
 	scanner.scanReceipt = ctx.Bool(scanReceiptFlag.Name)
-	scanner.startHeight = ctx.Uint64(utils.StartHeightFlag.Name)
+	startHeightArgument = ctx.Int64(startHeightFlag.Name)
 	scanner.endHeight = ctx.Uint64(utils.EndHeightFlag.Name)
 	scanner.stableHeight = ctx.Uint64(utils.StableHeightFlag.Name)
 	scanner.jobCount = ctx.Uint64(utils.JobsFlag.Name)
@@ -129,25 +136,15 @@ func scanSwap(ctx *cli.Context) error {
 	log.Info("get argument success",
 		"gateway", scanner.gateway,
 		"scanReceipt", scanner.scanReceipt,
-		"start", scanner.startHeight,
+		"start", startHeightArgument,
 		"end", scanner.endHeight,
 		"stable", scanner.stableHeight,
 		"jobs", scanner.jobCount,
 	)
 
-	scanner.verifyOptions()
 	scanner.initClient()
 	scanner.run()
 	return nil
-}
-
-func (scanner *ethSwapScanner) verifyOptions() {
-	if scanner.endHeight != 0 && scanner.startHeight >= scanner.endHeight {
-		log.Fatalf("wrong scan range [%v, %v)", scanner.startHeight, scanner.endHeight)
-	}
-	if scanner.jobCount == 0 {
-		log.Fatal("zero count jobs specified")
-	}
 }
 
 func (scanner *ethSwapScanner) initClient() {
@@ -163,25 +160,31 @@ func (scanner *ethSwapScanner) run() {
 	scanner.cachedSwapPosts = tools.NewRing(100)
 	go scanner.repostCachedSwaps()
 
-	start := scanner.startHeight
 	wend := scanner.endHeight
 	if wend == 0 {
 		wend = scanner.loopGetLatestBlockNumber()
 	}
-	if start == 0 {
-		start = wend
+	if startHeightArgument != 0 {
+		var start uint64
+		if startHeightArgument > 0 {
+			start = uint64(startHeightArgument)
+		} else if startHeightArgument < 0 {
+			start = wend - uint64(-startHeightArgument)
+		}
+		scanner.doScanRangeJob(start, wend)
 	}
-
-	scanner.doScanRangeJob(start, wend)
-
 	if scanner.endHeight == 0 {
 		scanner.scanLoop(wend)
 	}
 }
 
 func (scanner *ethSwapScanner) doScanRangeJob(start, end uint64) {
+	log.Info("start scan range job", "start", start, "end", end, "jobs", scanner.jobCount)
+	if scanner.jobCount == 0 {
+		log.Fatal("zero count jobs specified")
+	}
 	if start >= end {
-		return
+		log.Fatalf("wrong scan range [%v, %v)", start, end)
 	}
 	jobs := scanner.jobCount
 	count := end - start
@@ -207,7 +210,7 @@ func (scanner *ethSwapScanner) doScanRangeJob(start, end uint64) {
 
 func (scanner *ethSwapScanner) scanRange(job, from, to uint64, wg *sync.WaitGroup) {
 	defer wg.Done()
-	log.Info(fmt.Sprintf("[%v] start scan range", job), "from", from, "to", to)
+	log.Info(fmt.Sprintf("[%v] scan range", job), "from", from, "to", to)
 
 	for h := from; h < to; h++ {
 		scanner.scanBlock(job, h, false)
@@ -218,7 +221,7 @@ func (scanner *ethSwapScanner) scanRange(job, from, to uint64, wg *sync.WaitGrou
 
 func (scanner *ethSwapScanner) scanLoop(from uint64) {
 	stable := scanner.stableHeight
-	log.Info("start scan loop", "from", from, "stable", stable)
+	log.Info("start scan loop job", "from", from, "stable", stable)
 	for {
 		latest := scanner.loopGetLatestBlockNumber()
 		for h := latest; h > from; h-- {
