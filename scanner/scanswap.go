@@ -73,10 +73,6 @@ scan cross chain swaps
 )
 
 const (
-	txSwapin   = "swapin"
-	txSwapout  = "swapout"
-	txSwapout2 = "swapout2"
-
 	swapExistKeywords   = "mgoError: Item is duplicate"
 	httpTimeoutKeywords = "Client.Timeout exceeded while awaiting headers"
 )
@@ -231,7 +227,7 @@ func (scanner *ethSwapScanner) scanLoop(from uint64) {
 		if from+stable < latest {
 			from = latest - stable
 		}
-		time.Sleep(5 * time.Second)
+		time.Sleep(1 * time.Second)
 	}
 }
 
@@ -328,17 +324,20 @@ func (scanner *ethSwapScanner) scanTransaction(tx *types.Transaction) {
 
 func (scanner *ethSwapScanner) verifyTransaction(tx *types.Transaction, receipt *types.Receipt, tokenCfg *params.TokenConfig) (matched bool, verifyErr error) {
 	txTo := tx.To().Hex()
-	tokenAddress := tokenCfg.TokenAddress
+	cmpTxTo := tokenCfg.TokenAddress
 	depositAddress := tokenCfg.DepositAddress
 
-	if tokenCfg.VerifyByReceipt && receipt == nil {
-		txHash := tx.Hash()
-		r, err := scanner.loopGetTxReceipt(txHash)
-		if err != nil {
-			log.Warn("get tx receipt error", "txHash", txHash, "err", err)
-			return false, nil
+	if tokenCfg.CallByContract != "" {
+		cmpTxTo = tokenCfg.CallByContract
+		if receipt == nil {
+			txHash := tx.Hash()
+			r, err := scanner.loopGetTxReceipt(txHash)
+			if err != nil {
+				log.Warn("get tx receipt error", "txHash", txHash, "err", err)
+				return false, nil
+			}
+			receipt = r
 		}
-		receipt = r
 	}
 
 	switch {
@@ -346,7 +345,7 @@ func (scanner *ethSwapScanner) verifyTransaction(tx *types.Transaction, receipt 
 		if tokenCfg.IsNativeToken() {
 			matched = strings.EqualFold(txTo, depositAddress)
 			return matched, nil
-		} else if strings.EqualFold(txTo, tokenAddress) {
+		} else if strings.EqualFold(txTo, cmpTxTo) {
 			verifyErr = scanner.verifyErc20SwapinTx(tx, receipt, tokenCfg)
 			if verifyErr == tokens.ErrTxWithWrongReceiver {
 				// swapin my have multiple deposit addresses for different bridges
@@ -355,12 +354,12 @@ func (scanner *ethSwapScanner) verifyTransaction(tx *types.Transaction, receipt 
 			return true, verifyErr
 		}
 	case !scanner.scanReceipt:
-		if strings.EqualFold(txTo, tokenAddress) {
+		if strings.EqualFold(txTo, cmpTxTo) {
 			verifyErr = scanner.verifySwapoutTx(tx, receipt, tokenCfg)
 			return true, verifyErr
 		}
 	default:
-		verifyErr = scanner.parseSwapoutTxLogs(receipt.Logs, tokenAddress, tokenCfg.TxType)
+		verifyErr = scanner.parseSwapoutTxLogs(receipt.Logs, tokenCfg)
 		if verifyErr == nil {
 			return true, nil
 		}
@@ -432,7 +431,7 @@ func (scanner *ethSwapScanner) repostCachedSwaps() {
 		scanner.cachedSwapPosts.Do(func(p interface{}) bool {
 			return scanner.repostSwap(p.(*swapPost))
 		})
-		time.Sleep(30 * time.Second)
+		time.Sleep(10 * time.Second)
 	}
 }
 
@@ -471,9 +470,9 @@ func (scanner *ethSwapScanner) repostSwap(swap *swapPost) bool {
 
 func (scanner *ethSwapScanner) getSwapoutFuncHashByTxType(txType string) []byte {
 	switch strings.ToLower(txType) {
-	case txSwapout:
+	case params.TxSwapout:
 		return addressSwapoutFuncHash
-	case txSwapout2:
+	case params.TxSwapout2:
 		return stringSwapoutFuncHash
 	default:
 		log.Errorf("unknown swapout tx type %v", txType)
@@ -483,11 +482,11 @@ func (scanner *ethSwapScanner) getSwapoutFuncHashByTxType(txType string) []byte 
 
 func (scanner *ethSwapScanner) getLogTopicByTxType(txType string) common.Hash {
 	switch strings.ToLower(txType) {
-	case txSwapin:
+	case params.TxSwapin:
 		return transferLogTopic
-	case txSwapout:
+	case params.TxSwapout:
 		return addressSwapoutLogTopic
-	case txSwapout2:
+	case params.TxSwapout2:
 		return stringSwapoutLogTopic
 	default:
 		log.Errorf("unknown tx type %v", txType)
@@ -499,7 +498,7 @@ func (scanner *ethSwapScanner) verifyErc20SwapinTx(tx *types.Transaction, receip
 	if receipt == nil {
 		err = scanner.parseErc20SwapinTxInput(tx.Data(), tokenCfg.DepositAddress)
 	} else {
-		err = scanner.parseErc20SwapinTxLogs(receipt.Logs, tokenCfg.TokenAddress, tokenCfg.DepositAddress, tokenCfg.TxType)
+		err = scanner.parseErc20SwapinTxLogs(receipt.Logs, tokenCfg)
 	}
 	return err
 }
@@ -508,7 +507,7 @@ func (scanner *ethSwapScanner) verifySwapoutTx(tx *types.Transaction, receipt *t
 	if receipt == nil {
 		err = scanner.parseSwapoutTxInput(tx.Data(), tokenCfg.TxType)
 	} else {
-		err = scanner.parseSwapoutTxLogs(receipt.Logs, tokenCfg.TokenAddress, tokenCfg.TxType)
+		err = scanner.parseSwapoutTxLogs(receipt.Logs, tokenCfg)
 	}
 	return err
 }
@@ -533,7 +532,11 @@ func (scanner *ethSwapScanner) parseErc20SwapinTxInput(input []byte, depositAddr
 	return nil
 }
 
-func (scanner *ethSwapScanner) parseErc20SwapinTxLogs(logs []*types.Log, targetContract, depositAddress, txType string) (err error) {
+func (scanner *ethSwapScanner) parseErc20SwapinTxLogs(logs []*types.Log, tokenCfg *params.TokenConfig) (err error) {
+	targetContract := tokenCfg.TokenAddress
+	depositAddress := tokenCfg.DepositAddress
+	cmpLogTopic := scanner.getLogTopicByTxType(tokenCfg.TxType)
+
 	for _, log := range logs {
 		if log.Removed {
 			continue
@@ -544,7 +547,7 @@ func (scanner *ethSwapScanner) parseErc20SwapinTxLogs(logs []*types.Log, targetC
 		if len(log.Topics) != 3 || log.Data == nil {
 			continue
 		}
-		if log.Topics[0] == scanner.getLogTopicByTxType(txType) {
+		if log.Topics[0] == cmpLogTopic {
 			receiver := common.BytesToAddress(log.Topics[2][:]).Hex()
 			if strings.EqualFold(receiver, depositAddress) {
 				return nil
@@ -566,7 +569,10 @@ func (scanner *ethSwapScanner) parseSwapoutTxInput(input []byte, txType string) 
 	return tokens.ErrTxFuncHashMismatch
 }
 
-func (scanner *ethSwapScanner) parseSwapoutTxLogs(logs []*types.Log, targetContract, txType string) (err error) {
+func (scanner *ethSwapScanner) parseSwapoutTxLogs(logs []*types.Log, tokenCfg *params.TokenConfig) (err error) {
+	targetContract := tokenCfg.TokenAddress
+	cmpLogTopic := scanner.getLogTopicByTxType(tokenCfg.TxType)
+
 	for _, log := range logs {
 		if log.Removed {
 			continue
@@ -577,7 +583,7 @@ func (scanner *ethSwapScanner) parseSwapoutTxLogs(logs []*types.Log, targetContr
 		if len(log.Topics) != 3 || log.Data == nil {
 			continue
 		}
-		if log.Topics[0] == scanner.getLogTopicByTxType(txType) {
+		if log.Topics[0] == cmpLogTopic {
 			return nil
 		}
 	}

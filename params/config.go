@@ -11,6 +11,13 @@ import (
 	"github.com/anyswap/CrossChain-Bridge/log"
 )
 
+// swap tx types
+const (
+	TxSwapin   = "swapin"
+	TxSwapout  = "swapout"
+	TxSwapout2 = "swapout2"
+)
+
 var (
 	configFile string
 	scanConfig = &ScanConfig{}
@@ -23,12 +30,12 @@ type ScanConfig struct {
 
 // TokenConfig token config
 type TokenConfig struct {
-	TxType          string
-	PairID          string
-	SwapServer      string
-	TokenAddress    string
-	DepositAddress  string `toml:",omitempty" json:",omitempty"`
-	VerifyByReceipt bool   `toml:",omitempty" json:",omitempty"`
+	TxType         string
+	PairID         string
+	SwapServer     string
+	CallByContract string `toml:",omitempty" json:",omitempty"`
+	TokenAddress   string
+	DepositAddress string `toml:",omitempty" json:",omitempty"`
 }
 
 // IsNativeToken is native token
@@ -131,6 +138,12 @@ func (c *TokenConfig) CheckConfig() error {
 	}
 	if c.SwapServer == "" {
 		return errors.New("empty 'SwapServer'")
+	}
+	if c.CallByContract != "" && !common.IsHexAddress(c.CallByContract) {
+		return errors.New("wrong 'CallByContract' " + c.CallByContract)
+	}
+	if c.TxType == TxSwapin && c.CallByContract != "" && c.TokenAddress == "" {
+		c.TokenAddress = c.CallByContract // assign token address for swapin if empty
 	}
 	if !c.IsNativeToken() && !common.IsHexAddress(c.TokenAddress) {
 		return errors.New("wrong 'TokenAddress' " + c.TokenAddress)
