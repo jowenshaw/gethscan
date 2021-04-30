@@ -35,6 +35,12 @@ var (
 		Value: -200,
 	}
 
+	timeoutFlag = &cli.Uint64Flag{
+		Name:  "timeout",
+		Usage: "timeout of scanning one block in seconds",
+		Value: 300,
+	}
+
 	// ScanSwapCommand scan swaps on eth like blockchain
 	ScanSwapCommand = &cli.Command{
 		Action:    scanSwap,
@@ -52,6 +58,7 @@ scan cross chain swaps
 			utils.EndHeightFlag,
 			utils.StableHeightFlag,
 			utils.JobsFlag,
+			timeoutFlag,
 		},
 	}
 
@@ -83,6 +90,9 @@ type ethSwapScanner struct {
 	endHeight    uint64
 	stableHeight uint64
 	jobCount     uint64
+
+	processBlockTimeout time.Duration
+	processBlockTimers  []time.Timer
 
 	client *ethclient.Client
 	ctx    context.Context
@@ -116,6 +126,7 @@ func scanSwap(ctx *cli.Context) error {
 	scanner.endHeight = ctx.Uint64(utils.EndHeightFlag.Name)
 	scanner.stableHeight = ctx.Uint64(utils.StableHeightFlag.Name)
 	scanner.jobCount = ctx.Uint64(utils.JobsFlag.Name)
+	scanner.processBlockTimeout = time.Duration(ctx.Uint64(timeoutFlag.Name)) * time.Second
 
 	log.Info("get argument success",
 		"gateway", scanner.gateway,
@@ -124,6 +135,7 @@ func scanSwap(ctx *cli.Context) error {
 		"end", scanner.endHeight,
 		"stable", scanner.stableHeight,
 		"jobs", scanner.jobCount,
+		"timeout", scanner.processBlockTimeout,
 	)
 
 	scanner.initClient()
@@ -143,6 +155,8 @@ func (scanner *ethSwapScanner) initClient() {
 func (scanner *ethSwapScanner) run() {
 	scanner.cachedSwapPosts = tools.NewRing(100)
 	go scanner.repostCachedSwaps()
+
+	scanner.processBlockTimers = make([]time.Timer, scanner.jobCount+1)
 
 	wend := scanner.endHeight
 	if wend == 0 {
@@ -264,8 +278,17 @@ func (scanner *ethSwapScanner) scanBlock(job, height uint64, cache bool) {
 		return
 	}
 	log.Info(fmt.Sprintf("[%v] scan block %v", job, height), "hash", blockHash, "txs", len(block.Transactions()))
+
+	scanner.processBlockTimers[job].Reset(scanner.processBlockTimeout)
+SCANTXS:
 	for _, tx := range block.Transactions() {
-		scanner.scanTransaction(tx)
+		select {
+		case <-scanner.processBlockTimers[job].C:
+			log.Warn(fmt.Sprintf("[%v] scan block %v timeout", job, height), "hash", blockHash, "txs", len(block.Transactions()))
+			break SCANTXS
+		default:
+			scanner.scanTransaction(tx)
+		}
 	}
 	if cache {
 		cachedBlocks.addBlock(blockHash)
