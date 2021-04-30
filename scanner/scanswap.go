@@ -92,7 +92,7 @@ type ethSwapScanner struct {
 	jobCount     uint64
 
 	processBlockTimeout time.Duration
-	processBlockTimers  []time.Timer
+	processBlockTimers  []*time.Timer
 
 	client *ethclient.Client
 	ctx    context.Context
@@ -156,7 +156,10 @@ func (scanner *ethSwapScanner) run() {
 	scanner.cachedSwapPosts = tools.NewRing(100)
 	go scanner.repostCachedSwaps()
 
-	scanner.processBlockTimers = make([]time.Timer, scanner.jobCount+1)
+	scanner.processBlockTimers = make([]*time.Timer, scanner.jobCount+1)
+	for i := 0; i < len(scanner.processBlockTimers); i++ {
+		scanner.processBlockTimers[i] = time.NewTimer(scanner.processBlockTimeout)
+	}
 
 	wend := scanner.endHeight
 	if wend == 0 {
