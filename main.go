@@ -19,12 +19,17 @@ func initApp() {
 	// Initialize the CLI app and start action
 	app.Action = run
 	app.Version = params.Version
+	app.HideVersion = true
 	app.Usage = "scan eth like blockchain"
 	app.Commands = []*cli.Command{
 		scanner.ScanSwapCommand,
+		scanner.VersionCommand,
 	}
 	app.Flags = []cli.Flag{
-		scanner.VerbosityFlag,
+		utils.LogFileFlag,
+		utils.LogRotationFlag,
+		utils.LogMaxAgeFlag,
+		utils.VerbosityFlag,
 		utils.JSONFormatFlag,
 		utils.ColorFormatFlag,
 	}

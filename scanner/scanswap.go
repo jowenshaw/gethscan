@@ -24,13 +24,6 @@ import (
 )
 
 var (
-	// VerbosityFlag --verbosity
-	VerbosityFlag = &cli.Uint64Flag{
-		Name:  "verbosity",
-		Usage: "0:panic, 1:fatal, 2:error, 3:warn, 4:info, 5:debug, 6:trace",
-		Value: 4,
-	}
-
 	scanReceiptFlag = &cli.BoolFlag{
 		Name:  "scanReceipt",
 		Usage: "scan transaction receipt instead of transaction",
@@ -107,17 +100,8 @@ type swapPost struct {
 	swapServer string
 }
 
-// SetLogger set logger
-func SetLogger(ctx *cli.Context) {
-	logLevel := ctx.Uint64(VerbosityFlag.Name)
-	jsonFormat := ctx.Bool(utils.JSONFormatFlag.Name)
-	colorFormat := ctx.Bool(utils.ColorFormatFlag.Name)
-	log.SetLogger(uint32(logLevel), jsonFormat, colorFormat)
-	log.Info("init logger finished", "logLevel", logLevel, "jsonFormat", jsonFormat, "colorFormat", colorFormat)
-}
-
 func scanSwap(ctx *cli.Context) error {
-	SetLogger(ctx)
+	utils.SetLogger(ctx)
 	params.LoadConfig(utils.GetConfigFilePath(ctx))
 	go params.WatchAndReloadScanConfig()
 
