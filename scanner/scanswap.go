@@ -246,8 +246,15 @@ func (scanner *ethSwapScanner) loopGetLatestBlockNumber() uint64 {
 	}
 }
 
-func (scanner *ethSwapScanner) getTxReceipt(txHash common.Hash) (*types.Receipt, error) {
-	return scanner.client.TransactionReceipt(scanner.ctx, txHash)
+func (scanner *ethSwapScanner) getTxReceipt(txHash common.Hash) (receipt *types.Receipt, err error) {
+	for i := 0; i < 3; i++ { // with retry
+		receipt, err = scanner.client.TransactionReceipt(scanner.ctx, txHash)
+		if err == nil {
+			return receipt, err
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return nil, err
 }
 
 func (scanner *ethSwapScanner) loopGetBlock(height uint64) *types.Block {
@@ -309,6 +316,17 @@ func (scanner *ethSwapScanner) verifyTransaction(tx *types.Transaction, receipt 
 	txTo := tx.To().Hex()
 	tokenAddress := tokenCfg.TokenAddress
 	depositAddress := tokenCfg.DepositAddress
+
+	if tokenCfg.VerifyByReceipt && receipt == nil {
+		txHash := tx.Hash()
+		r, err := scanner.getTxReceipt(txHash)
+		if err != nil {
+			log.Warn("get tx receipt error", "txHash", txHash, "err", err)
+			return false, nil
+		}
+		receipt = r
+	}
+
 	switch {
 	case depositAddress != "":
 		if tokenCfg.IsNativeToken() {

@@ -23,11 +23,12 @@ type ScanConfig struct {
 
 // TokenConfig token config
 type TokenConfig struct {
-	TxType         string
-	PairID         string
-	SwapServer     string
-	TokenAddress   string
-	DepositAddress string `toml:",omitempty" json:",omitempty"`
+	TxType          string
+	PairID          string
+	SwapServer      string
+	TokenAddress    string
+	DepositAddress  string `toml:",omitempty" json:",omitempty"`
+	VerifyByReceipt bool   `toml:",omitempty" json:",omitempty"`
 }
 
 // IsNativeToken is native token

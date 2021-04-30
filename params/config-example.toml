@@ -13,6 +13,14 @@ TokenAddress = "0x61b8c4d6d28d5f7edadbea5456db3b4f7f836b64"
 DepositAddress = "0xbF0A46d3700E23a98F38079cE217742c92Bb66bC"
 
 [[Tokens]]
+TxType = "swapin"
+PairID = "wETHv2"
+SwapServer = "http://127.0.0.1:22557/rpc"
+TokenAddress = "0x38b1aad678d9f47ae9bcb79bd9e4a5975fe3a2bd"
+DepositAddress = "0x13B432914A996b0A48695dF9B2d701edA45FF264"
+VerifyByReceipt = true
+
+[[Tokens]]
 TxType = "swapout"
 PairID = "bsc"
 SwapServer = "http://127.0.0.1:33556/rpc"
