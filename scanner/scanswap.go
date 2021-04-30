@@ -123,7 +123,7 @@ func scanSwap(ctx *cli.Context) error {
 
 	scanner := &ethSwapScanner{
 		ctx:           context.Background(),
-		rpcInterval:   3 * time.Second,
+		rpcInterval:   1 * time.Second,
 		rpcRetryCount: 3,
 	}
 	scanner.gateway = ctx.String(utils.GatewayFlag.Name)
@@ -246,31 +246,35 @@ func (scanner *ethSwapScanner) loopGetLatestBlockNumber() uint64 {
 	}
 }
 
-func (scanner *ethSwapScanner) getTxReceipt(txHash common.Hash) (receipt *types.Receipt, err error) {
+func (scanner *ethSwapScanner) loopGetTxReceipt(txHash common.Hash) (receipt *types.Receipt, err error) {
 	for i := 0; i < 3; i++ { // with retry
 		receipt, err = scanner.client.TransactionReceipt(scanner.ctx, txHash)
 		if err == nil {
 			return receipt, err
 		}
-		time.Sleep(1 * time.Second)
+		time.Sleep(scanner.rpcInterval)
 	}
 	return nil, err
 }
 
-func (scanner *ethSwapScanner) loopGetBlock(height uint64) *types.Block {
+func (scanner *ethSwapScanner) loopGetBlock(height uint64) (block *types.Block, err error) {
 	blockNumber := new(big.Int).SetUint64(height)
-	for {
-		block, err := scanner.client.BlockByNumber(scanner.ctx, blockNumber)
+	for i := 0; i < 3; i++ {
+		block, err = scanner.client.BlockByNumber(scanner.ctx, blockNumber)
 		if err == nil {
-			return block
+			return block, nil
 		}
 		log.Warn("get block failed", "height", height, "err", err)
 		time.Sleep(scanner.rpcInterval)
 	}
+	return nil, err
 }
 
 func (scanner *ethSwapScanner) scanBlock(job, height uint64, cache bool) {
-	block := scanner.loopGetBlock(height)
+	block, err := scanner.loopGetBlock(height)
+	if err != nil {
+		return
+	}
 	blockHash := block.Hash().Hex()
 	if cache && cachedBlocks.isScanned(blockHash) {
 		return
@@ -291,7 +295,7 @@ func (scanner *ethSwapScanner) scanTransaction(tx *types.Transaction) {
 	txHash := tx.Hash().Hex()
 	var receipt *types.Receipt
 	if scanner.scanReceipt {
-		r, err := scanner.getTxReceipt(tx.Hash())
+		r, err := scanner.loopGetTxReceipt(tx.Hash())
 		if err != nil {
 			log.Warn("get tx receipt error", "txHash", txHash, "err", err)
 			return
@@ -319,7 +323,7 @@ func (scanner *ethSwapScanner) verifyTransaction(tx *types.Transaction, receipt 
 
 	if tokenCfg.VerifyByReceipt && receipt == nil {
 		txHash := tx.Hash()
-		r, err := scanner.getTxReceipt(txHash)
+		r, err := scanner.loopGetTxReceipt(txHash)
 		if err != nil {
 			log.Warn("get tx receipt error", "txHash", txHash, "err", err)
 			return false, nil
