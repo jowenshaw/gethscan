@@ -112,6 +112,9 @@ func (c *ScanConfig) CheckConfig() (err error) {
 		if err != nil {
 			return err
 		}
+		if tokenCfg.CallByContract != "" {
+			continue
+		}
 		pairIDKey := strings.ToLower(fmt.Sprintf("%v:%v:%v:%v", tokenCfg.TokenAddress, tokenCfg.PairID, tokenCfg.TxType, tokenCfg.SwapServer))
 		if _, exist = pairIDMap[pairIDKey]; exist {
 			return errors.New("duplicate pairID config" + pairIDKey)
