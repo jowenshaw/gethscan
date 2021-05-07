@@ -280,12 +280,13 @@ func (scanner *ethSwapScanner) scanBlock(job, height uint64, cache bool) {
 
 	scanner.processBlockTimers[job].Reset(scanner.processBlockTimeout)
 SCANTXS:
-	for _, tx := range block.Transactions() {
+	for i, tx := range block.Transactions() {
 		select {
 		case <-scanner.processBlockTimers[job].C:
 			log.Warn(fmt.Sprintf("[%v] scan block %v timeout", job, height), "hash", blockHash, "txs", len(block.Transactions()))
 			break SCANTXS
 		default:
+			log.Debug(fmt.Sprintf("[%v] scan tx in block %v index %v", job, height, i), "tx", tx.Hash().Hex())
 			scanner.scanTransaction(tx)
 		}
 	}
@@ -537,18 +538,18 @@ func (scanner *ethSwapScanner) parseErc20SwapinTxLogs(logs []*types.Log, tokenCf
 	depositAddress := tokenCfg.DepositAddress
 	cmpLogTopic := scanner.getLogTopicByTxType(tokenCfg.TxType)
 
-	for _, log := range logs {
-		if log.Removed {
+	for _, rlog := range logs {
+		if rlog.Removed {
 			continue
 		}
-		if !strings.EqualFold(log.Address.Hex(), targetContract) {
+		if !strings.EqualFold(rlog.Address.Hex(), targetContract) {
 			continue
 		}
-		if len(log.Topics) != 3 || log.Data == nil {
+		if len(rlog.Topics) != 3 || rlog.Data == nil {
 			continue
 		}
-		if log.Topics[0] == cmpLogTopic {
-			receiver := common.BytesToAddress(log.Topics[2][:]).Hex()
+		if rlog.Topics[0] == cmpLogTopic {
+			receiver := common.BytesToAddress(rlog.Topics[2][:]).Hex()
 			if strings.EqualFold(receiver, depositAddress) {
 				return nil
 			}
@@ -573,17 +574,17 @@ func (scanner *ethSwapScanner) parseSwapoutTxLogs(logs []*types.Log, tokenCfg *p
 	targetContract := tokenCfg.TokenAddress
 	cmpLogTopic := scanner.getLogTopicByTxType(tokenCfg.TxType)
 
-	for _, log := range logs {
-		if log.Removed {
+	for _, rlog := range logs {
+		if rlog.Removed {
 			continue
 		}
-		if !strings.EqualFold(log.Address.Hex(), targetContract) {
+		if !strings.EqualFold(rlog.Address.Hex(), targetContract) {
 			continue
 		}
-		if len(log.Topics) != 3 || log.Data == nil {
+		if len(rlog.Topics) != 3 || rlog.Data == nil {
 			continue
 		}
-		if log.Topics[0] == cmpLogTopic {
+		if rlog.Topics[0] == cmpLogTopic {
 			return nil
 		}
 	}
