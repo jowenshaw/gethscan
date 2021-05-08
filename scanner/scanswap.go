@@ -459,6 +459,7 @@ func (scanner *ethSwapScanner) repostSwap(swap *swapPost) bool {
 		}
 		switch {
 		case errors.Is(err, tokens.ErrTxNotFound):
+		case errors.Is(err, tokens.ErrRPCQueryError):
 		case strings.Contains(err.Error(), httpTimeoutKeywords):
 		default:
 			log.Warn("repost swap failed", "swap", swap, "err", err)
