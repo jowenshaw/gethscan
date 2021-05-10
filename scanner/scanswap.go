@@ -221,7 +221,7 @@ func (scanner *ethSwapScanner) scanLoop(from uint64) {
 	log.Info("start scan loop job", "from", from, "stable", stable)
 	for {
 		latest := scanner.loopGetLatestBlockNumber()
-		for h := latest; h > from; h-- {
+		for h := from; h <= latest; h++ {
 			scanner.scanBlock(0, h, true)
 		}
 		if from+stable < latest {
@@ -232,7 +232,7 @@ func (scanner *ethSwapScanner) scanLoop(from uint64) {
 }
 
 func (scanner *ethSwapScanner) loopGetLatestBlockNumber() uint64 {
-	for {
+	for { // retry until success
 		header, err := scanner.client.HeaderByNumber(scanner.ctx, nil)
 		if err == nil {
 			log.Info("get latest block number success", "height", header.Number)
@@ -244,7 +244,7 @@ func (scanner *ethSwapScanner) loopGetLatestBlockNumber() uint64 {
 }
 
 func (scanner *ethSwapScanner) loopGetTxReceipt(txHash common.Hash) (receipt *types.Receipt, err error) {
-	for i := 0; i < 3; i++ { // with retry
+	for i := 0; i < 5; i++ { // with retry
 		receipt, err = scanner.client.TransactionReceipt(scanner.ctx, txHash)
 		if err == nil {
 			return receipt, err
@@ -256,7 +256,7 @@ func (scanner *ethSwapScanner) loopGetTxReceipt(txHash common.Hash) (receipt *ty
 
 func (scanner *ethSwapScanner) loopGetBlock(height uint64) (block *types.Block, err error) {
 	blockNumber := new(big.Int).SetUint64(height)
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 5; i++ { // with retry
 		block, err = scanner.client.BlockByNumber(scanner.ctx, blockNumber)
 		if err == nil {
 			return block, nil
@@ -334,7 +334,7 @@ func (scanner *ethSwapScanner) verifyTransaction(tx *types.Transaction, receipt 
 			txHash := tx.Hash()
 			r, err := scanner.loopGetTxReceipt(txHash)
 			if err != nil {
-				log.Warn("get tx receipt error", "txHash", txHash, "err", err)
+				log.Warn("get tx receipt error", "txHash", txHash.Hex(), "err", err)
 				return false, nil
 			}
 			receipt = r
