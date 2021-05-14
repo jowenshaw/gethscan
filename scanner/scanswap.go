@@ -312,6 +312,9 @@ func (scanner *ethSwapScanner) scanTransaction(tx *types.Transaction) {
 
 	for _, tokenCfg := range params.GetScanConfig().Tokens {
 		matched, verifyErr := scanner.verifyTransaction(tx, receipt, tokenCfg)
+		if verifyErr != nil {
+			log.Debug("verify tx failed", "txHash", txHash, "err", verifyErr)
+		}
 		if matched {
 			if tokens.ShouldRegisterSwapForError(verifyErr) {
 				scanner.postSwap(txHash, tokenCfg)
@@ -582,7 +585,7 @@ func (scanner *ethSwapScanner) parseSwapoutTxLogs(logs []*types.Log, tokenCfg *p
 		if !strings.EqualFold(rlog.Address.Hex(), targetContract) {
 			continue
 		}
-		if len(rlog.Topics) != 3 || rlog.Data == nil {
+		if len(rlog.Topics) != 2 || rlog.Data == nil {
 			continue
 		}
 		if rlog.Topics[0] == cmpLogTopic {
