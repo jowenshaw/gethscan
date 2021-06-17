@@ -247,7 +247,7 @@ func (scanner *ethSwapScanner) loopGetTxReceipt(txHash common.Hash) (receipt *ty
 	for i := 0; i < 5; i++ { // with retry
 		receipt, err = scanner.client.TransactionReceipt(scanner.ctx, txHash)
 		if err == nil {
-			return receipt, err
+			return receipt, nil
 		}
 		time.Sleep(scanner.rpcInterval)
 	}
@@ -351,7 +351,7 @@ func (scanner *ethSwapScanner) verifyTransaction(tx *types.Transaction, receipt 
 			return matched, nil
 		} else if strings.EqualFold(txTo, cmpTxTo) {
 			verifyErr = scanner.verifyErc20SwapinTx(tx, receipt, tokenCfg)
-			if verifyErr == tokens.ErrTxWithWrongReceiver {
+			if errors.Is(verifyErr, tokens.ErrTxWithWrongReceiver) {
 				// swapin my have multiple deposit addresses for different bridges
 				return false, verifyErr
 			}
@@ -402,6 +402,7 @@ func (scanner *ethSwapScanner) postSwap(txid string, tokenCfg *params.TokenConfi
 	}
 
 	var needCached bool
+POST_LOOP:
 	for i := 0; i < scanner.rpcRetryCount; i++ {
 		err := rpcPost(swap)
 		if tokens.ShouldRegisterSwapForError(err) {
@@ -415,7 +416,7 @@ func (scanner *ethSwapScanner) postSwap(txid string, tokenCfg *params.TokenConfi
 		}
 		switch {
 		case errors.Is(err, tokens.ErrTxFuncHashMismatch):
-			break
+			break POST_LOOP
 		case errors.Is(err, tokens.ErrTxNotFound) ||
 			strings.Contains(err.Error(), httpTimeoutKeywords):
 			needCached = true
@@ -542,6 +543,7 @@ func (scanner *ethSwapScanner) parseErc20SwapinTxLogs(logs []*types.Log, tokenCf
 	depositAddress := tokenCfg.DepositAddress
 	cmpLogTopic := scanner.getLogTopicByTxType(tokenCfg.TxType)
 
+	transferLogExist := false
 	for _, rlog := range logs {
 		if rlog.Removed {
 			continue
@@ -552,13 +554,17 @@ func (scanner *ethSwapScanner) parseErc20SwapinTxLogs(logs []*types.Log, tokenCf
 		if len(rlog.Topics) != 3 || rlog.Data == nil {
 			continue
 		}
-		if rlog.Topics[0] == cmpLogTopic {
-			receiver := common.BytesToAddress(rlog.Topics[2][:]).Hex()
-			if strings.EqualFold(receiver, depositAddress) {
-				return nil
-			}
-			return tokens.ErrTxWithWrongReceiver
+		if rlog.Topics[0] != cmpLogTopic {
+			continue
 		}
+		transferLogExist = true
+		receiver := common.BytesToAddress(rlog.Topics[2][:]).Hex()
+		if strings.EqualFold(receiver, depositAddress) {
+			return nil
+		}
+	}
+	if transferLogExist {
+		return tokens.ErrTxWithWrongReceiver
 	}
 	return tokens.ErrDepositLogNotFound
 }
