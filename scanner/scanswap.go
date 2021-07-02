@@ -486,17 +486,17 @@ func (scanner *ethSwapScanner) getSwapoutFuncHashByTxType(txType string) []byte 
 	}
 }
 
-func (scanner *ethSwapScanner) getLogTopicByTxType(txType string) common.Hash {
+func (scanner *ethSwapScanner) getLogTopicByTxType(txType string) (topTopic common.Hash, topicsLen int) {
 	switch strings.ToLower(txType) {
 	case params.TxSwapin:
-		return transferLogTopic
+		return transferLogTopic, 3
 	case params.TxSwapout:
-		return addressSwapoutLogTopic
+		return addressSwapoutLogTopic, 3
 	case params.TxSwapout2:
-		return stringSwapoutLogTopic
+		return stringSwapoutLogTopic, 2
 	default:
 		log.Errorf("unknown tx type %v", txType)
-		return common.Hash{}
+		return common.Hash{}, 0
 	}
 }
 
@@ -541,7 +541,7 @@ func (scanner *ethSwapScanner) parseErc20SwapinTxInput(input []byte, depositAddr
 func (scanner *ethSwapScanner) parseErc20SwapinTxLogs(logs []*types.Log, tokenCfg *params.TokenConfig) (err error) {
 	targetContract := tokenCfg.TokenAddress
 	depositAddress := tokenCfg.DepositAddress
-	cmpLogTopic := scanner.getLogTopicByTxType(tokenCfg.TxType)
+	cmpLogTopic, topicsLen := scanner.getLogTopicByTxType(tokenCfg.TxType)
 
 	transferLogExist := false
 	for _, rlog := range logs {
@@ -551,7 +551,7 @@ func (scanner *ethSwapScanner) parseErc20SwapinTxLogs(logs []*types.Log, tokenCf
 		if !strings.EqualFold(rlog.Address.Hex(), targetContract) {
 			continue
 		}
-		if len(rlog.Topics) != 3 || rlog.Data == nil {
+		if len(rlog.Topics) != topicsLen || rlog.Data == nil {
 			continue
 		}
 		if rlog.Topics[0] != cmpLogTopic {
@@ -582,7 +582,7 @@ func (scanner *ethSwapScanner) parseSwapoutTxInput(input []byte, txType string) 
 
 func (scanner *ethSwapScanner) parseSwapoutTxLogs(logs []*types.Log, tokenCfg *params.TokenConfig) (err error) {
 	targetContract := tokenCfg.TokenAddress
-	cmpLogTopic := scanner.getLogTopicByTxType(tokenCfg.TxType)
+	cmpLogTopic, topicsLen := scanner.getLogTopicByTxType(tokenCfg.TxType)
 
 	for _, rlog := range logs {
 		if rlog.Removed {
@@ -591,7 +591,7 @@ func (scanner *ethSwapScanner) parseSwapoutTxLogs(logs []*types.Log, tokenCfg *p
 		if !strings.EqualFold(rlog.Address.Hex(), targetContract) {
 			continue
 		}
-		if len(rlog.Topics) != 2 || rlog.Data == nil {
+		if len(rlog.Topics) != topicsLen || rlog.Data == nil {
 			continue
 		}
 		if rlog.Topics[0] == cmpLogTopic {
