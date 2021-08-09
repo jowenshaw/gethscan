@@ -77,9 +77,11 @@ scan cross chain swaps
 )
 
 const (
-	swapExistKeywords   = "mgoError: Item is duplicate"
-	httpTimeoutKeywords = "Client.Timeout exceeded while awaiting headers"
-	rpcQueryErrKeywords = "rpc query error"
+	postSwapSuccessResult   = "success"
+	bridgeSwapExistKeywords = "mgoError: Item is duplicate"
+	routerSwapExistResult   = "alreday registered"
+	httpTimeoutKeywords     = "Client.Timeout exceeded while awaiting headers"
+	rpcQueryErrKeywords     = "rpc query error"
 )
 
 var startHeightArgument int64
@@ -481,6 +483,7 @@ func (scanner *ethSwapScanner) repostCachedSwaps() {
 }
 
 func rpcPost(swap *swapPost) error {
+	var isRouterSwap bool
 	var args interface{}
 	if swap.pairID != "" {
 		args = map[string]interface{}{
@@ -488,6 +491,7 @@ func rpcPost(swap *swapPost) error {
 			"pairid": swap.pairID,
 		}
 	} else if swap.logIndex != "" {
+		isRouterSwap = true
 		args = map[string]string{
 			"chainid":  swap.chainID,
 			"txid":     swap.txid,
@@ -501,13 +505,43 @@ func rpcPost(swap *swapPost) error {
 	reqID := 666
 	var result interface{}
 	err := client.RPCPostWithTimeoutAndID(&result, timeout, reqID, swap.swapServer, swap.rpcMethod, args)
-	if err == nil {
-		log.Info("post swap success", "swap", args)
-	} else if strings.Contains(err.Error(), swapExistKeywords) {
-		err = nil // ignore this kind of error
-		log.Info("post swap already exist", "swap", args)
-	} else {
-		log.Warn("post swap failed", "swap", args, "server", swap.swapServer, "err", err)
+
+	if err != nil {
+		if isRouterSwap {
+			log.Warn("post router swap failed", "swap", args, "server", swap.swapServer, "err", err)
+			return err
+		}
+		if strings.Contains(err.Error(), bridgeSwapExistKeywords) {
+			err = nil // ignore this kind of error
+			log.Info("post bridge swap already exist", "swap", args)
+		} else {
+			log.Warn("post bridge swap failed", "swap", args, "server", swap.swapServer, "err", err)
+		}
+		return err
+	}
+
+	if !isRouterSwap {
+		log.Info("post bridge swap success", "swap", args)
+		return nil
+	}
+
+	var status string
+	if res, ok := result.(map[string]interface{}); ok {
+		status, _ = res[swap.logIndex].(string)
+	}
+	if status == "" {
+		err = errors.New("post router swap unmarshal result failed")
+		log.Error(err.Error(), "swap", args, "server", swap.swapServer, "result", result)
+		return err
+	}
+	switch status {
+	case postSwapSuccessResult:
+		log.Info("post router swap success", "swap", args)
+	case routerSwapExistResult:
+		log.Info("post router swap already exist", "swap", args)
+	default:
+		err = errors.New(status)
+		log.Info("post router swap failed", "swap", args, "server", swap.swapServer, "err", err)
 	}
 	return err
 }
