@@ -507,7 +507,7 @@ func rpcPost(swap *swapPost) error {
 		err = nil // ignore this kind of error
 		log.Info("post swap already exist", "swap", args)
 	} else {
-		log.Info("post swap failed", "swap", args, "err", err)
+		log.Warn("post swap failed", "swap", args, "server", swap.swapServer, "err", err)
 	}
 	return err
 }

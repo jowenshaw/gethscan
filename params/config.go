@@ -123,7 +123,7 @@ func (c *ScanConfig) CheckConfig() (err error) {
 			return err
 		}
 		if tokenCfg.IsRouterSwap() {
-			rkey := strings.ToLower(fmt.Sprintf("%v:%v", tokenCfg.ChainID, tokenCfg.RouterContract))
+			rkey := strings.ToLower(fmt.Sprintf("%v:%v:%v", tokenCfg.ChainID, tokenCfg.RouterContract, tokenCfg.SwapServer))
 			if _, exist = routerswapMap[rkey]; exist {
 				return errors.New("duplicate router swap config " + tokenCfg.RouterContract)
 			}
