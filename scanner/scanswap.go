@@ -14,13 +14,13 @@ import (
 	"github.com/anyswap/CrossChain-Bridge/log"
 	"github.com/anyswap/CrossChain-Bridge/rpc/client"
 	"github.com/anyswap/CrossChain-Bridge/tokens"
-	ctools "github.com/anyswap/CrossChain-Bridge/tokens/tools"
 	"github.com/fsn-dev/fsn-go-sdk/efsn/common"
 	"github.com/fsn-dev/fsn-go-sdk/efsn/core/types"
 	"github.com/fsn-dev/fsn-go-sdk/efsn/ethclient"
+	"github.com/urfave/cli/v2"
+
 	"github.com/jowenshaw/gethscan/params"
 	"github.com/jowenshaw/gethscan/tools"
-	"github.com/urfave/cli/v2"
 )
 
 var (
@@ -70,11 +70,16 @@ scan cross chain swaps
 	transferLogTopic       = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
 	addressSwapoutLogTopic = common.HexToHash("0x6b616089d04950dc06c45c6dd787d657980543f89651aec47924752c7d16c888")
 	stringSwapoutLogTopic  = common.HexToHash("0x9c92ad817e5474d30a4378deface765150479363a897b0590fbb12ae9d89396b")
+
+	routerAnySwapOutTopic                  = common.FromHex("0x97116cf6cd4f6412bb47914d6db18da9e16ab2142f543b86e207c24fbd16b23a")
+	routerAnySwapTradeTokensForTokensTopic = common.FromHex("0xfea6abdf4fd32f20966dff7619354cd82cd43dc78a3bee479f04c74dbfc585b3")
+	routerAnySwapTradeTokensForNativeTopic = common.FromHex("0x278277e0209c347189add7bd92411973b5f6b8644f7ac62ea1be984ce993f8f4")
 )
 
 const (
 	swapExistKeywords   = "mgoError: Item is duplicate"
 	httpTimeoutKeywords = "Client.Timeout exceeded while awaiting headers"
+	rpcQueryErrKeywords = "rpc query error"
 )
 
 var startHeightArgument int64
@@ -100,10 +105,17 @@ type ethSwapScanner struct {
 }
 
 type swapPost struct {
+	// common
 	txid       string
-	pairID     string
 	rpcMethod  string
 	swapServer string
+
+	// bridge
+	pairID string
+
+	// router
+	chainID  string
+	logIndex string
 }
 
 func scanSwap(ctx *cli.Context) error {
@@ -247,6 +259,10 @@ func (scanner *ethSwapScanner) loopGetTxReceipt(txHash common.Hash) (receipt *ty
 	for i := 0; i < 5; i++ { // with retry
 		receipt, err = scanner.client.TransactionReceipt(scanner.ctx, txHash)
 		if err == nil {
+			if receipt.Status != 1 {
+				log.Debug("tx with wrong receipt status", "txHash", txHash.Hex())
+				return nil, errors.New("tx with wrong receipt status")
+			}
 			return receipt, nil
 		}
 		time.Sleep(scanner.rpcInterval)
@@ -299,129 +315,155 @@ func (scanner *ethSwapScanner) scanTransaction(tx *types.Transaction) {
 	if tx.To() == nil {
 		return
 	}
+
 	txHash := tx.Hash().Hex()
-	var receipt *types.Receipt
-	if scanner.scanReceipt {
+
+	for _, tokenCfg := range params.GetScanConfig().Tokens {
+		verifyErr := scanner.verifyTransaction(tx, tokenCfg)
+		if verifyErr != nil {
+			log.Debug("verify tx failed", "txHash", txHash, "err", verifyErr)
+		}
+	}
+}
+
+func (scanner *ethSwapScanner) checkTxToAddress(tx *types.Transaction, tokenCfg *params.TokenConfig) (receipt *types.Receipt, isAcceptToAddr bool) {
+	needReceipt := scanner.scanReceipt
+	txtoAddress := tx.To().String()
+
+	var cmpTxTo string
+	if tokenCfg.IsRouterSwap() {
+		cmpTxTo = tokenCfg.RouterContract
+		needReceipt = true
+	} else if tokenCfg.IsNativeToken() {
+		cmpTxTo = tokenCfg.DepositAddress
+	} else {
+		cmpTxTo = tokenCfg.TokenAddress
+		if tokenCfg.CallByContract != "" {
+			cmpTxTo = tokenCfg.CallByContract
+			needReceipt = true
+		}
+	}
+
+	if strings.EqualFold(txtoAddress, cmpTxTo) {
+		isAcceptToAddr = true
+	} else if !tokenCfg.IsNativeToken() {
+		for _, whiteAddr := range tokenCfg.Whitelist {
+			if strings.EqualFold(txtoAddress, whiteAddr) {
+				isAcceptToAddr = true
+				needReceipt = true
+				break
+			}
+		}
+	}
+
+	if !isAcceptToAddr {
+		return nil, false
+	}
+
+	if needReceipt {
 		r, err := scanner.loopGetTxReceipt(tx.Hash())
 		if err != nil {
-			log.Warn("get tx receipt error", "txHash", txHash, "err", err)
-			return
+			log.Warn("get tx receipt error", "txHash", tx.Hash().Hex(), "err", err)
+			return nil, false
 		}
 		receipt = r
 	}
 
-	for _, tokenCfg := range params.GetScanConfig().Tokens {
-		matched, verifyErr := scanner.verifyTransaction(tx, receipt, tokenCfg)
-		if verifyErr != nil {
-			log.Debug("verify tx failed", "txHash", txHash, "err", verifyErr)
-		}
-		if matched {
-			if tokens.ShouldRegisterSwapForError(verifyErr) {
-				scanner.postSwap(txHash, tokenCfg)
-			} else {
-				scanner.printVerifyError(txHash, verifyErr)
-			}
-			break
-		}
-	}
+	return receipt, true
 }
 
-func (scanner *ethSwapScanner) verifyTransaction(tx *types.Transaction, receipt *types.Receipt, tokenCfg *params.TokenConfig) (matched bool, verifyErr error) {
-	txTo := tx.To().Hex()
-	cmpTxTo := tokenCfg.TokenAddress
-	depositAddress := tokenCfg.DepositAddress
-
-	if tokenCfg.CallByContract != "" {
-		cmpTxTo = tokenCfg.CallByContract
-		if receipt == nil {
-			txHash := tx.Hash()
-			r, err := scanner.loopGetTxReceipt(txHash)
-			if err != nil {
-				log.Warn("get tx receipt error", "txHash", txHash.Hex(), "err", err)
-				return false, nil
-			}
-			receipt = r
-		}
+func (scanner *ethSwapScanner) verifyTransaction(tx *types.Transaction, tokenCfg *params.TokenConfig) (verifyErr error) {
+	receipt, isAcceptToAddr := scanner.checkTxToAddress(tx, tokenCfg)
+	if !isAcceptToAddr {
+		return nil
 	}
 
+	txHash := tx.Hash().Hex()
+
 	switch {
-	case depositAddress != "":
+	// router swap
+	case tokenCfg.IsRouterSwap():
+		scanner.verifyAndPostRouterSwapTx(tx, receipt, tokenCfg)
+		return nil
+
+	// bridge swapin
+	case tokenCfg.DepositAddress != "":
 		if tokenCfg.IsNativeToken() {
-			matched = strings.EqualFold(txTo, depositAddress)
-			return matched, nil
-		} else if strings.EqualFold(txTo, cmpTxTo) {
-			verifyErr = scanner.verifyErc20SwapinTx(tx, receipt, tokenCfg)
-			if errors.Is(verifyErr, tokens.ErrTxWithWrongReceiver) {
-				// swapin my have multiple deposit addresses for different bridges
-				return false, verifyErr
-			}
-			return true, verifyErr
+			scanner.postBridgeSwap(txHash, tokenCfg)
+			return nil
 		}
-	case !scanner.scanReceipt:
-		if strings.EqualFold(txTo, cmpTxTo) {
+
+		verifyErr = scanner.verifyErc20SwapinTx(tx, receipt, tokenCfg)
+		// swapin my have multiple deposit addresses for different bridges
+		if errors.Is(verifyErr, tokens.ErrTxWithWrongReceiver) {
+			return nil
+		}
+
+	// bridge swapout
+	default:
+		if scanner.scanReceipt {
+			verifyErr = scanner.parseSwapoutTxLogs(receipt.Logs, tokenCfg)
+		} else {
 			verifyErr = scanner.verifySwapoutTx(tx, receipt, tokenCfg)
-			return true, verifyErr
-		}
-	default:
-		verifyErr = scanner.parseSwapoutTxLogs(receipt.Logs, tokenCfg)
-		if verifyErr == nil {
-			return true, nil
 		}
 	}
-	return false, verifyErr
-}
 
-func (scanner *ethSwapScanner) printVerifyError(txHash string, verifyErr error) {
-	switch {
-	case errors.Is(verifyErr, tokens.ErrTxFuncHashMismatch):
-	case errors.Is(verifyErr, tokens.ErrTxWithWrongReceiver):
-	case errors.Is(verifyErr, tokens.ErrTxWithWrongContract):
-	case errors.Is(verifyErr, tokens.ErrTxNotFound):
-	default:
-		log.Debug("verify swap error", "txHash", txHash, "err", verifyErr)
+	if verifyErr == nil {
+		scanner.postBridgeSwap(txHash, tokenCfg)
 	}
+	return verifyErr
 }
 
-func (scanner *ethSwapScanner) postSwap(txid string, tokenCfg *params.TokenConfig) {
+func (scanner *ethSwapScanner) postBridgeSwap(txid string, tokenCfg *params.TokenConfig) {
 	pairID := tokenCfg.PairID
 	var subject, rpcMethod string
 	if tokenCfg.DepositAddress != "" {
-		subject = "post swapin register"
+		subject = "post bridge swapin register"
 		rpcMethod = "swap.Swapin"
 	} else {
-		subject = "post swapout register"
+		subject = "post bridge swapout register"
 		rpcMethod = "swap.Swapout"
 	}
 	log.Info(subject, "txid", txid, "pairID", pairID)
-
 	swap := &swapPost{
 		txid:       txid,
 		pairID:     pairID,
 		rpcMethod:  rpcMethod,
 		swapServer: tokenCfg.SwapServer,
 	}
+	scanner.postSwapPost(swap)
+}
 
+func (scanner *ethSwapScanner) postRouterSwap(txid string, logIndex int, tokenCfg *params.TokenConfig) {
+	chainID := tokenCfg.ChainID
+
+	subject := "post router swap register"
+	rpcMethod := "swap.RegisterRouterSwap"
+	log.Info(subject, "chainid", chainID, "txid", txid, "logindex", logIndex)
+
+	swap := &swapPost{
+		txid:       txid,
+		chainID:    chainID,
+		logIndex:   fmt.Sprintf("%d", logIndex),
+		rpcMethod:  rpcMethod,
+		swapServer: tokenCfg.SwapServer,
+	}
+	scanner.postSwapPost(swap)
+}
+
+func (scanner *ethSwapScanner) postSwapPost(swap *swapPost) {
 	var needCached bool
-POST_LOOP:
 	for i := 0; i < scanner.rpcRetryCount; i++ {
 		err := rpcPost(swap)
-		if tokens.ShouldRegisterSwapForError(err) {
+		if err == nil || strings.Contains(err.Error(), swapExistKeywords) {
 			needCached = false
 			break
 		}
-		if ctools.IsSwapAlreadyExistRegisterError(err) ||
-			strings.Contains(err.Error(), swapExistKeywords) {
-			needCached = false
-			break
-		}
-		switch {
-		case errors.Is(err, tokens.ErrTxFuncHashMismatch):
-			break POST_LOOP
-		case errors.Is(err, tokens.ErrTxNotFound) ||
-			strings.Contains(err.Error(), httpTimeoutKeywords):
+		if errors.Is(err, tokens.ErrTxNotFound) ||
+			strings.Contains(err.Error(), httpTimeoutKeywords) {
 			needCached = true
-		default:
-			log.Warn(subject+" failed", "swap", swap, "err", err)
+		} else {
+			log.Warn("post swap failed", "swap", swap, "err", err)
 		}
 		time.Sleep(scanner.rpcInterval)
 	}
@@ -441,12 +483,24 @@ func (scanner *ethSwapScanner) repostCachedSwaps() {
 }
 
 func rpcPost(swap *swapPost) error {
+	var args interface{}
+	if swap.pairID != "" {
+		args = map[string]interface{}{
+			"txid":   swap.txid,
+			"pairid": swap.pairID,
+		}
+	} else if swap.logIndex != "" {
+		args = map[string]string{
+			"chainid":  swap.chainID,
+			"txid":     swap.txid,
+			"logindex": swap.logIndex,
+		}
+	} else {
+		return fmt.Errorf("wrong swap post item %v", swap)
+	}
+
 	timeout := 300
 	reqID := 666
-	args := map[string]interface{}{
-		"txid":   swap.txid,
-		"pairid": swap.pairID,
-	}
 	var result interface{}
 	return client.RPCPostWithTimeoutAndID(&result, timeout, reqID, swap.swapServer, swap.rpcMethod, args)
 }
@@ -454,15 +508,11 @@ func rpcPost(swap *swapPost) error {
 func (scanner *ethSwapScanner) repostSwap(swap *swapPost) bool {
 	for i := 0; i < scanner.rpcRetryCount; i++ {
 		err := rpcPost(swap)
-		if tokens.ShouldRegisterSwapForError(err) {
-			return true
-		}
-		if ctools.IsSwapAlreadyExistRegisterError(err) ||
-			strings.Contains(err.Error(), swapExistKeywords) {
+		if err == nil || strings.Contains(err.Error(), swapExistKeywords) {
 			return true
 		}
 		switch {
-		case errors.Is(err, tokens.ErrRPCQueryError):
+		case strings.Contains(err.Error(), rpcQueryErrKeywords):
 		case strings.Contains(err.Error(), httpTimeoutKeywords):
 		default:
 			log.Warn("repost swap failed", "swap", swap, "err", err)
@@ -515,6 +565,30 @@ func (scanner *ethSwapScanner) verifySwapoutTx(tx *types.Transaction, receipt *t
 		err = scanner.parseSwapoutTxLogs(receipt.Logs, tokenCfg)
 	}
 	return err
+}
+
+func (scanner *ethSwapScanner) verifyAndPostRouterSwapTx(tx *types.Transaction, receipt *types.Receipt, tokenCfg *params.TokenConfig) {
+	if receipt == nil {
+		return
+	}
+	for i := 1; i < len(receipt.Logs); i++ {
+		rlog := receipt.Logs[i]
+		if rlog.Removed {
+			continue
+		}
+		if !strings.EqualFold(rlog.Address.String(), tokenCfg.RouterContract) {
+			continue
+		}
+		logTopic := rlog.Topics[0].Bytes()
+		switch {
+		case bytes.Equal(logTopic, routerAnySwapOutTopic):
+		case bytes.Equal(logTopic, routerAnySwapTradeTokensForTokensTopic):
+		case bytes.Equal(logTopic, routerAnySwapTradeTokensForNativeTopic):
+		default:
+			continue
+		}
+		scanner.postRouterSwap(tx.Hash().Hex(), i, tokenCfg)
+	}
 }
 
 func (scanner *ethSwapScanner) parseErc20SwapinTxInput(input []byte, depositAddress string) error {

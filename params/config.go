@@ -13,9 +13,10 @@ import (
 
 // swap tx types
 const (
-	TxSwapin   = "swapin"
-	TxSwapout  = "swapout"
-	TxSwapout2 = "swapout2"
+	TxSwapin     = "swapin"
+	TxSwapout    = "swapout"
+	TxSwapout2   = "swapout2" // swapout to string address (eg. BTC)
+	TxRouterSwap = "routerswap"
 )
 
 var (
@@ -30,12 +31,20 @@ type ScanConfig struct {
 
 // TokenConfig token config
 type TokenConfig struct {
+	// common
 	TxType         string
-	PairID         string
 	SwapServer     string
-	CallByContract string `toml:",omitempty" json:",omitempty"`
-	TokenAddress   string
+	CallByContract string   `toml:",omitempty" json:",omitempty"`
+	Whitelist      []string `toml:",omitempty" json:",omitempty"`
+
+	// bridge
+	PairID         string `toml:",omitempty" json:",omitempty"`
+	TokenAddress   string `toml:",omitempty" json:",omitempty"`
 	DepositAddress string `toml:",omitempty" json:",omitempty"`
+
+	// router
+	ChainID        string `toml:",omitempty" json:",omitempty"`
+	RouterContract string `toml:",omitempty" json:",omitempty"`
 }
 
 // IsNativeToken is native token
@@ -106,18 +115,26 @@ func (c *ScanConfig) CheckConfig() (err error) {
 	}
 	pairIDMap := make(map[string]struct{})
 	tokensMap := make(map[string]struct{})
+	routerswapMap := make(map[string]struct{})
 	exist := false
 	for _, tokenCfg := range c.Tokens {
 		err = tokenCfg.CheckConfig()
 		if err != nil {
 			return err
 		}
+		if tokenCfg.IsRouterSwap() {
+			rkey := strings.ToLower(fmt.Sprintf("%v:%v", tokenCfg.ChainID, tokenCfg.RouterContract))
+			if _, exist = routerswapMap[rkey]; exist {
+				return errors.New("duplicate router swap config " + tokenCfg.RouterContract)
+			}
+			continue
+		}
 		if tokenCfg.CallByContract != "" {
 			continue
 		}
 		pairIDKey := strings.ToLower(fmt.Sprintf("%v:%v:%v:%v", tokenCfg.TokenAddress, tokenCfg.PairID, tokenCfg.TxType, tokenCfg.SwapServer))
 		if _, exist = pairIDMap[pairIDKey]; exist {
-			return errors.New("duplicate pairID config" + pairIDKey)
+			return errors.New("duplicate pairID config " + pairIDKey)
 		}
 		pairIDMap[pairIDKey] = struct{}{}
 		if !tokenCfg.IsNativeToken() {
@@ -131,13 +148,39 @@ func (c *ScanConfig) CheckConfig() (err error) {
 	return nil
 }
 
+// IsValidSwapType is valid swap type
+func (c *TokenConfig) IsValidSwapType() bool {
+	switch c.TxType {
+	case
+		TxSwapin,
+		TxSwapout,
+		TxSwapout2,
+		TxRouterSwap:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsBridgeSwap is bridge swap
+func (c *TokenConfig) IsBridgeSwap() bool {
+	switch c.TxType {
+	case TxSwapin, TxSwapout, TxSwapout2:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsRouterSwap is router swap
+func (c *TokenConfig) IsRouterSwap() bool {
+	return c.TxType == TxRouterSwap
+}
+
 // CheckConfig check token config
 func (c *TokenConfig) CheckConfig() error {
-	if c.TxType == "" {
-		return errors.New("empty 'TxType'")
-	}
-	if c.PairID == "" {
-		return errors.New("empty 'PairID'")
+	if !c.IsValidSwapType() {
+		return errors.New("invalid 'TxType'")
 	}
 	if c.SwapServer == "" {
 		return errors.New("empty 'SwapServer'")
@@ -145,14 +188,32 @@ func (c *TokenConfig) CheckConfig() error {
 	if c.CallByContract != "" && !common.IsHexAddress(c.CallByContract) {
 		return errors.New("wrong 'CallByContract' " + c.CallByContract)
 	}
-	if c.TxType == TxSwapin && c.CallByContract != "" && c.TokenAddress == "" {
-		c.TokenAddress = c.CallByContract // assign token address for swapin if empty
+	for _, addr := range c.Whitelist {
+		if !common.IsHexAddress(addr) {
+			return errors.New("wrong 'Whitelist' address " + addr)
+		}
 	}
-	if !c.IsNativeToken() && !common.IsHexAddress(c.TokenAddress) {
-		return errors.New("wrong 'TokenAddress' " + c.TokenAddress)
-	}
-	if c.DepositAddress != "" && !common.IsHexAddress(c.DepositAddress) {
-		return errors.New("wrong 'DepositAddress' " + c.DepositAddress)
+	switch {
+	case c.IsBridgeSwap():
+		if c.PairID == "" {
+			return errors.New("empty 'PairID'")
+		}
+		if c.TxType == TxSwapin && c.CallByContract != "" && c.TokenAddress == "" {
+			c.TokenAddress = c.CallByContract // assign token address for swapin if empty
+		}
+		if !c.IsNativeToken() && !common.IsHexAddress(c.TokenAddress) {
+			return errors.New("wrong 'TokenAddress' " + c.TokenAddress)
+		}
+		if c.DepositAddress != "" && !common.IsHexAddress(c.DepositAddress) {
+			return errors.New("wrong 'DepositAddress' " + c.DepositAddress)
+		}
+	case c.IsRouterSwap():
+		if !common.IsHexAddress(c.RouterContract) {
+			return errors.New("wrong 'RouterContract' " + c.RouterContract)
+		}
+		if _, err := common.GetBigIntFromStr(c.ChainID); err != nil {
+			return fmt.Errorf("wrong chainID '%v', %w", c.ChainID, err)
+		}
 	}
 	return nil
 }

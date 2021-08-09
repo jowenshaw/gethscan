@@ -37,3 +37,10 @@ TxType = "swapout2"
 PairID = "btc"
 SwapServer = "http://127.0.0.1:44556/rpc"
 TokenAddress = "0x81b8c4d8d28d5f8edadbea5458db3b4f8f838b84"
+
+[[Tokens]]
+TxType = "routerswap"
+ChainID = "1"
+SwapServer = "http://127.0.0.1:55556/rpc"
+RouterContract = "0x6b7a87899490ece95443e979ca9485cbe7e71522"
+Whitelist = []
