@@ -455,15 +455,13 @@ func (scanner *ethSwapScanner) postSwapPost(swap *swapPost) {
 	var needCached bool
 	for i := 0; i < scanner.rpcRetryCount; i++ {
 		err := rpcPost(swap)
-		if err == nil || strings.Contains(err.Error(), swapExistKeywords) {
+		if err == nil {
 			needCached = false
 			break
 		}
 		if errors.Is(err, tokens.ErrTxNotFound) ||
 			strings.Contains(err.Error(), httpTimeoutKeywords) {
 			needCached = true
-		} else {
-			log.Warn("post swap failed", "swap", swap, "err", err)
 		}
 		time.Sleep(scanner.rpcInterval)
 	}
@@ -502,20 +500,28 @@ func rpcPost(swap *swapPost) error {
 	timeout := 300
 	reqID := 666
 	var result interface{}
-	return client.RPCPostWithTimeoutAndID(&result, timeout, reqID, swap.swapServer, swap.rpcMethod, args)
+	err := client.RPCPostWithTimeoutAndID(&result, timeout, reqID, swap.swapServer, swap.rpcMethod, args)
+	if err == nil {
+		log.Info("post swap success", "swap", args)
+	} else if strings.Contains(err.Error(), swapExistKeywords) {
+		err = nil // ignore this kind of error
+		log.Info("post swap already exist", "swap", args)
+	} else {
+		log.Info("post swap failed", "swap", args, "err", err)
+	}
+	return err
 }
 
 func (scanner *ethSwapScanner) repostSwap(swap *swapPost) bool {
 	for i := 0; i < scanner.rpcRetryCount; i++ {
 		err := rpcPost(swap)
-		if err == nil || strings.Contains(err.Error(), swapExistKeywords) {
+		if err == nil {
 			return true
 		}
 		switch {
 		case strings.Contains(err.Error(), rpcQueryErrKeywords):
 		case strings.Contains(err.Error(), httpTimeoutKeywords):
 		default:
-			log.Warn("repost swap failed", "swap", swap, "err", err)
 			return true
 		}
 		time.Sleep(scanner.rpcInterval)
