@@ -14,10 +14,11 @@ import (
 	"github.com/anyswap/CrossChain-Bridge/log"
 	"github.com/anyswap/CrossChain-Bridge/rpc/client"
 	"github.com/anyswap/CrossChain-Bridge/tokens"
-	"github.com/fsn-dev/fsn-go-sdk/efsn/common"
-	"github.com/fsn-dev/fsn-go-sdk/efsn/core/types"
-	"github.com/fsn-dev/fsn-go-sdk/efsn/ethclient"
 	"github.com/urfave/cli/v2"
+
+	ethclient "github.com/jowenshaw/gethclient"
+	"github.com/jowenshaw/gethclient/common"
+	"github.com/jowenshaw/gethclient/types"
 
 	"github.com/jowenshaw/gethscan/params"
 	"github.com/jowenshaw/gethscan/tools"
@@ -90,6 +91,8 @@ type ethSwapScanner struct {
 	gateway     string
 	scanReceipt bool
 
+	chainID *big.Int
+
 	endHeight    uint64
 	stableHeight uint64
 	jobCount     uint64
@@ -160,6 +163,11 @@ func (scanner *ethSwapScanner) initClient() {
 	}
 	log.Info("ethclient.Dail gateway success", "gateway", scanner.gateway)
 	scanner.client = ethcli
+	scanner.chainID, err = ethcli.ChainID(scanner.ctx)
+	if err != nil {
+		log.Fatal("get chainID failed", "err", err)
+	}
+	log.Info("get chainID success", "chainID", scanner.chainID)
 }
 
 func (scanner *ethSwapScanner) run() {
