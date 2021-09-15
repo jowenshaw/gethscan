@@ -75,6 +75,10 @@ scan cross chain swaps
 	routerAnySwapOutTopic                  = common.FromHex("0x97116cf6cd4f6412bb47914d6db18da9e16ab2142f543b86e207c24fbd16b23a")
 	routerAnySwapTradeTokensForTokensTopic = common.FromHex("0xfea6abdf4fd32f20966dff7619354cd82cd43dc78a3bee479f04c74dbfc585b3")
 	routerAnySwapTradeTokensForNativeTopic = common.FromHex("0x278277e0209c347189add7bd92411973b5f6b8644f7ac62ea1be984ce993f8f4")
+
+	logNFT721SwapOutTopic       = common.FromHex("0x0d45b0b9f5add3e1bb841982f1fa9303628b0b619b000cb1f9f1c3903329a4c7")
+	logNFT1155SwapOutTopic      = common.FromHex("0x5058b8684cf36ffd9f66bc623fbc617a44dd65cf2273306d03d3104af0995cb0")
+	logNFT1155SwapOutBatchTopic = common.FromHex("0xaa428a5ab688b49b415401782c170d216b33b15711d30cf69482f570eca8db38")
 )
 
 const (
@@ -449,7 +453,7 @@ func (scanner *ethSwapScanner) postRouterSwap(txid string, logIndex int, tokenCf
 
 	subject := "post router swap register"
 	rpcMethod := "swap.RegisterRouterSwap"
-	log.Info(subject, "chainid", chainID, "txid", txid, "logindex", logIndex)
+	log.Info(subject, "swaptype", tokenCfg.TxType, "chainid", chainID, "txid", txid, "logindex", logIndex)
 
 	swap := &swapPost{
 		txid:       txid,
@@ -629,11 +633,22 @@ func (scanner *ethSwapScanner) verifyAndPostRouterSwapTx(tx *types.Transaction, 
 		}
 		logTopic := rlog.Topics[0].Bytes()
 		switch {
-		case bytes.Equal(logTopic, routerAnySwapOutTopic):
-		case bytes.Equal(logTopic, routerAnySwapTradeTokensForTokensTopic):
-		case bytes.Equal(logTopic, routerAnySwapTradeTokensForNativeTopic):
-		default:
-			continue
+		case tokenCfg.IsRouterERC20Swap():
+			switch {
+			case bytes.Equal(logTopic, routerAnySwapOutTopic):
+			case bytes.Equal(logTopic, routerAnySwapTradeTokensForTokensTopic):
+			case bytes.Equal(logTopic, routerAnySwapTradeTokensForNativeTopic):
+			default:
+				continue
+			}
+		case tokenCfg.IsRouterNFTSwap():
+			switch {
+			case bytes.Equal(logTopic, logNFT721SwapOutTopic):
+			case bytes.Equal(logTopic, logNFT1155SwapOutTopic):
+			case bytes.Equal(logTopic, logNFT1155SwapOutBatchTopic):
+			default:
+				continue
+			}
 		}
 		scanner.postRouterSwap(tx.Hash().Hex(), i, tokenCfg)
 	}

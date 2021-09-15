@@ -13,10 +13,11 @@ import (
 
 // swap tx types
 const (
-	TxSwapin     = "swapin"
-	TxSwapout    = "swapout"
-	TxSwapout2   = "swapout2" // swapout to string address (eg. BTC)
-	TxRouterSwap = "routerswap"
+	TxSwapin          = "swapin"
+	TxSwapout         = "swapout"
+	TxSwapout2        = "swapout2" // swapout to string address (eg. BTC)
+	TxRouterERC20Swap = "routerswap"
+	TxRouterNFTSwap   = "nftswap"
 )
 
 var (
@@ -155,7 +156,8 @@ func (c *TokenConfig) IsValidSwapType() bool {
 		TxSwapin,
 		TxSwapout,
 		TxSwapout2,
-		TxRouterSwap:
+		TxRouterERC20Swap,
+		TxRouterNFTSwap:
 		return true
 	default:
 		return false
@@ -174,13 +176,28 @@ func (c *TokenConfig) IsBridgeSwap() bool {
 
 // IsRouterSwap is router swap
 func (c *TokenConfig) IsRouterSwap() bool {
-	return c.TxType == TxRouterSwap
+	switch c.TxType {
+	case TxRouterERC20Swap, TxRouterNFTSwap:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsRouterERC20Swap is router erc20 swap
+func (c *TokenConfig) IsRouterERC20Swap() bool {
+	return c.TxType == TxRouterERC20Swap
+}
+
+// IsRouterNFTSwap is router nft swap
+func (c *TokenConfig) IsRouterNFTSwap() bool {
+	return c.TxType == TxRouterNFTSwap
 }
 
 // CheckConfig check token config
 func (c *TokenConfig) CheckConfig() error {
 	if !c.IsValidSwapType() {
-		return errors.New("invalid 'TxType'")
+		return errors.New("invalid 'TxType' " + c.TxType)
 	}
 	if c.SwapServer == "" {
 		return errors.New("empty 'SwapServer'")

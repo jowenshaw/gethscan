@@ -44,3 +44,10 @@ ChainID = "1"
 SwapServer = "http://127.0.0.1:55556/rpc"
 RouterContract = "0x6b7a87899490ece95443e979ca9485cbe7e71522"
 Whitelist = []
+
+[[Tokens]]
+TxType = "nftswap"
+ChainID = "1"
+SwapServer = "http://127.0.0.1:66556/rpc"
+RouterContract = "0x5F69b7Ab8F7cAb199a310Fd5A27B43Fef44ddcC0"
+Whitelist = []
