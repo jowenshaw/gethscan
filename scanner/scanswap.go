@@ -84,7 +84,7 @@ scan cross chain swaps
 const (
 	postSwapSuccessResult   = "success"
 	bridgeSwapExistKeywords = "mgoError: Item is duplicate"
-	routerSwapExistResult   = "alreday registered"
+	routerSwapExistResult   = "already registered"
 	httpTimeoutKeywords     = "Client.Timeout exceeded while awaiting headers"
 	rpcQueryErrKeywords     = "rpc query error"
 )
