@@ -546,10 +546,10 @@ func rpcPost(swap *swapPost) error {
 		log.Error(err.Error(), "swap", args, "server", swap.swapServer, "result", result)
 		return err
 	}
-	switch status {
-	case postSwapSuccessResult:
+	switch {
+	case strings.HasPrefix(status, postSwapSuccessResult):
 		log.Info("post router swap success", "swap", args)
-	case routerSwapExistResult:
+	case strings.HasPrefix(status, routerSwapExistResult):
 		log.Info("post router swap already exist", "swap", args)
 	default:
 		err = errors.New(status)
