@@ -25,23 +25,6 @@ import (
 )
 
 var (
-	scanReceiptFlag = &cli.BoolFlag{
-		Name:  "scanReceipt",
-		Usage: "scan transaction receipt instead of transaction",
-	}
-
-	startHeightFlag = &cli.Int64Flag{
-		Name:  "start",
-		Usage: "start height (start inclusive)",
-		Value: -200,
-	}
-
-	timeoutFlag = &cli.Uint64Flag{
-		Name:  "timeout",
-		Usage: "timeout of scanning one block in seconds",
-		Value: 300,
-	}
-
 	// ScanSwapCommand scan swaps on eth like blockchain
 	ScanSwapCommand = &cli.Command{
 		Action:    scanSwap,
@@ -735,30 +718,4 @@ func (scanner *ethSwapScanner) parseSwapoutTxLogs(logs []*types.Log, tokenCfg *p
 		}
 	}
 	return tokens.ErrSwapoutLogNotFound
-}
-
-type cachedSacnnedBlocks struct {
-	capacity  int
-	nextIndex int
-	hashes    []string
-}
-
-var cachedBlocks = &cachedSacnnedBlocks{
-	capacity:  100,
-	nextIndex: 0,
-	hashes:    make([]string, 100),
-}
-
-func (cache *cachedSacnnedBlocks) addBlock(blockHash string) {
-	cache.hashes[cache.nextIndex] = blockHash
-	cache.nextIndex = (cache.nextIndex + 1) % cache.capacity
-}
-
-func (cache *cachedSacnnedBlocks) isScanned(blockHash string) bool {
-	for _, b := range cache.hashes {
-		if b == blockHash {
-			return true
-		}
-	}
-	return false
 }
